@@ -1,7 +1,10 @@
-// Token Radar v3 (radar-v3): one snapshot of the protocol universe in, one ranked board out.
+// Token Radar v4 (radar-v4): one snapshot of the protocol universe in, one ranked board out.
 //
 // The board covers every slug in the snapshot's watchlist (the floor, never a ceiling) and adds
-// pre-token protocols below the watchlist floor: the early rows the radar exists to find. A protocol
+// every other protocol the house's pre-token rule calls a launch candidate (v4: 158 early rows -
+// 138 below the floor, 20 above it that the watchlist leaves out; v3 carried only the 173
+// largest below-floor rows and, worse, ranked 48 wrapped/staked/bridged products as launches
+// because it applied only part of the house rule - see isRankable). A protocol
 // is pre-token when its index entry records no token (no market cap, no CoinGecko id, no symbol);
 // the snapshot's live-token protocols are kept apart and shown as the market's own values, never
 // mixed into the ranked board.
@@ -26,14 +29,19 @@
 //
 // Token odds are a LOGISTIC REGRESSION fitted on all 758 protocols (label: records a token),
 // implemented from scratch in this file (gradient descent, L2 lambda = 10, 600 iterations,
-// standard library only). Features, all from the snapshot: log TVL, log(age + 1) with
-// missing listed_at scored as 365 days plus a missing-age flag, 7d growth clamped to
-// -60..+30% for the odds feature (the +120% cap of the value model would let one listing
-// artifact, Shift DeFi at +4448%, dominate the feature; peer token rates are already at
-// their floor above +30%), number of chains capped at 10 (one protocol lists 176 chains),
+// standard library only). Features, all from the snapshot: log TVL, AGE AS FIVE ONE-HOT BANDS
+// (0-179, 180-364, 365-729, 730+ days, and missing listed_at as its own band) - v4 replaces
+// v3's log(age+1) term, because the peer token rate is flat in the middle (39.7% at 180-364d,
+// 38.3% at 365-729d) and jumps at 730+ days (67.9%), while missing listed_at is the most
+// token-prone group of all (78.8%): a log-linear age term cannot express that shape. 7d growth
+// clamped to -60..+30% for the odds feature (the +120% cap of the value model would let one
+// listing artifact, Shift DeFi at +4448%, dominate the feature; peer token rates are already
+// at their floor above +30%), number of chains capped at 10 (one protocol lists 176 chains),
 // and one-hot category for the 14 categories with >= 20 protocols. Held out it beats the
-// v1 age x TVL bucket odds clearly (TESTS-v2.md): 5-fold out-of-fold log-loss 0.586 vs
-// bucket 0.662 vs base rate 0.688; AUC 0.763 vs 0.619. EV = implied * odds. The board's
+// v1 age x TVL bucket odds clearly (TESTS-v2.md) and the v3 log-age logistic (TESTS-v4.md):
+// 5-fold out-of-fold log-loss 0.575 vs bucket 0.662 vs log-age 0.586 vs base rate 0.688;
+// AUC 0.770 vs 0.619 / 0.763. The age-band gain holds on all five 5-fold seeds (-0.009 to
+// -0.013) and on split-half, 20 seeds (0.577 vs 0.588). EV = implied * odds. The board's
 // rank is by implied value, as the gate requires (implied_value_usd must not rise as rank
 // ascends); the dashboard's default view sorts by EV, which is the "worth farming next"
 // ranking, and every row carries its EV rank separately. Odds are the PEER PREVALENCE of
@@ -52,21 +60,21 @@
 // is a TOTAL implied market cap, not a per-farmer payout, so $/hour is a ranking index on
 // total EV, not a wage; the methodology panel says this in plain words. Verdict: FARM
 // when EV >= $12.5M and odds >= 0.45; THIN when EV >= $2.5M and odds >= 0.35; otherwise
-// SKIP. Break-even odds = cost / implied. V3 tested this rule instead of assuming it
-// (TESTS-v3.md): break-even odds are at most 0.0023% on the whole board, so the farm cost
+// SKIP. Break-even odds = cost / implied. V4 re-tested this rule on the new board
+// (TESTS-v4.md): break-even odds are at most 0.0024% on the whole board, so the farm cost
 // never binds and the 45% floor is a likelihood standard, not a cost cover: FARM means
 // the token is at least roughly even-money (45% is 50% minus ~5 points of calibration
-// slack, the mid deciles over-predict by 4-7 points), and the sweep shows 40% and 45%
-// give the identical FARM set while 30% admits exactly the two Risk Curators the odds
-// model flags (Steakhouse 36.6%, Gauntlet 30.5%; peer token rate 12.8%) and 50% drops
-// onre (48.6%) and upshift (45.8%). The EV tier matters more: $5M gives 39 FARM,
-// $25M gives 3, $50M gives 1 (Veda only). V3 also tested odds calibration (Platt,
-// isotonic, shrinkage to the base rate) and adopted none of them: all three failed to
-// improve held-out log-loss/Brier, and the shrinkage gain (-0.002 log-loss) is inside
-// noise (paired t = -0.65, bootstrap 95% CI includes zero). The k = 8 category factor
-// is kept too: dropping it moves 53 board rows by more than 10 EV ranks (mostly Liquid
-// Staking rows moving up, which is the known +0.830 log bias returning), while the top
-// 10 EV rows are the same set under k = 8, k = 32 and no factor at all.
+// slack; the middle deciles over-predict by 3-5 points now), and the sweep shows 40%
+// admits two more rows (opentrade, usdd at 40.5%) while 30% admits five more (onre,
+// steakhouse-financial at 31.1%, upshift plus those two) and 50% drops cian-yield-layer
+// and veda (47.8-47.9%). The EV tier matters more: $5M gives 35 FARM, $25M gives 5,
+// $50M gives 1 (Veda only). V4 also re-tested odds calibration (Platt, isotonic, shrinkage
+// to the base rate) and adopted none of them: Platt and isotonic are worse held-out, and
+// the shrinkage gain at w=0.95 (-0.0013 log-loss) is inside noise (paired t = -0.80,
+// bootstrap 95% CI -0.0051 to +0.0016) with Brier unchanged and ECE worse. The k = 8
+// category factor is kept too: dropping it moves 53 board rows by more than 10 EV ranks
+// (mostly Liquid Staking rows moving up, which is the known +0.830 log bias returning),
+// while the top 10 EV rows are the same set under k = 8, k = 32 and no factor at all.
 //
 // What this model does NOT claim: a walk-forward test. The snapshot is one date (2026-11-14);
 // there is no TVL or price history in it, so no genuine walk-forward exists. The held-out tests
@@ -162,10 +170,13 @@ export function categoryFactor(category: string | null): number {
 }
 
 /** The model's version label: the dashboard names it and the rules quote it. */
-export const MODEL_VERSION = 'radar-v3';
+export const MODEL_VERSION = 'radar-v4';
 
-/** How many pre-token protocols below the watchlist floor the early radar carries, by TVL. */
-export const EARLY_ROWS = 173;
+/** How many pre-token protocols below the watchlist floor the early radar carries, by TVL.
+ * v4: the early set is every house-rule rankable protocol the watchlist does not name,
+ * above the floor as well as below it (158 rows: 138 below the floor, 20 above it) - the
+ * floor filter is gone, because the watchlist is a floor, never a ceiling. */
+export const EARLY_ROWS = 158;
 
 /** How many live-token protocols the Live token view carries, by market cap. */
 export const LIVE_ROWS = 24;
@@ -207,24 +218,24 @@ export const TEST_RESULTS = {
     { k: 64, loo_log_rmse: 1.625 },
     { k: 'inf (no factor)', loo_log_rmse: 1.618 },
   ],
-  // v3: verdict-threshold sweep on the 213 board rows (raw logistic odds).
+  // v4: verdict-threshold sweep on the 198 board rows (age-band logistic odds).
   verdict_sweep: {
     farm_odds_thresholds: [
-      { threshold: 0.3, farm: 14, thin: 70, skip: 129, enters_vs_045: ['gauntlet', 'steakhouse-financial'] },
-      { threshold: 0.35, farm: 13, thin: 70, skip: 130, enters_vs_045: ['steakhouse-financial'] },
-      { threshold: 0.4, farm: 12, thin: 71, skip: 130, enters_vs_045: [] },
-      { threshold: 0.45, farm: 12, thin: 71, skip: 130, enters_vs_045: [] },
-      { threshold: 0.5, farm: 10, thin: 73, skip: 130, leaves_vs_045: ['onre', 'upshift'] },
+      { threshold: 0.3, farm: 17, thin: 65, skip: 116, enters_vs_045: ['onre', 'opentrade', 'steakhouse-financial', 'upshift', 'usdd'] },
+      { threshold: 0.35, farm: 15, thin: 65, skip: 118, enters_vs_045: ['onre', 'opentrade', 'usdd'] },
+      { threshold: 0.4, farm: 14, thin: 66, skip: 118, enters_vs_045: ['opentrade', 'usdd'] },
+      { threshold: 0.45, farm: 12, thin: 68, skip: 118, enters_vs_045: [] },
+      { threshold: 0.5, farm: 10, thin: 70, skip: 118, leaves_vs_045: ['cian-yield-layer', 'veda'] },
     ],
     farm_ev_tiers: [
-      { ev_tier_usd: 5_000_000, farm: 39 },
+      { ev_tier_usd: 5_000_000, farm: 35 },
       { ev_tier_usd: 12_500_000, farm: 12 },
-      { ev_tier_usd: 25_000_000, farm: 3 },
+      { ev_tier_usd: 25_000_000, farm: 5 },
       { ev_tier_usd: 50_000_000, farm: 1 },
     ],
-    breakeven_odds: { max: 0.000023, max_row: 'swan-dao', median: 0.000004, p90: 0.000011 },
+    breakeven_odds: { max: 0.000024, max_row: 'damm-capital', median: 0.000003, p90: 0.00001 },
     decision:
-      'Keep FARM at EV >= $12.5M and odds >= 45%. Break-even odds are at most 0.0023% on the whole board, so the farm cost never binds: the 45% floor is a likelihood standard (roughly even money, minus ~5 points of calibration slack), not a cost cover. 40% and 45% give the identical FARM set; 30% admits exactly the two Risk Curators (Steakhouse 36.6%, Gauntlet 30.5%); 50% drops onre (48.6%) and upshift (45.8%).',
+      'Keep FARM at EV >= $12.5M and odds >= 45%. Break-even odds are at most 0.0024% on the whole board, so the farm cost never binds: the 45% floor is a likelihood standard (roughly even money, minus ~5 points of calibration slack), not a cost cover. 40% admits opentrade and usdd (40.5%); 30% admits five more rows, including Steakhouse Financial (31.1%) and onre (39.1%); 50% drops cian-yield-layer (47.9%) and veda (47.8%).',
   },
   // v3: ranking impact of the value model's category factor (same odds, implied recomputed).
   k_ranking_impact: {
@@ -234,13 +245,13 @@ export const TEST_RESULTS = {
       'Keep k = 8. Dropping the factor improves LOO by only 0.024 log units (1.618 vs 1.642) but moves 53 rows by more than 10 EV ranks, mostly Liquid Staking rows moving up - that is the known systematic bias returning (category holdout: Liquid Staking +0.830 log, Lending +0.913 log). The top 10 EV rows are the same set under k = 8, k = 32 and no factor.',
   },
   odds: {
-    model: 'Logistic regression, L2 lambda 10, 600 gradient-descent iterations, features: log TVL, log(age+1), 7d growth clamped -60..+30%, chains capped at 10, missing-age flag, one-hot category (14 categories with n >= 20). Fitted at build time from the snapshot.',
-    split_half_logloss: 0.59,
-    split_half_auc: 0.758,
-    split_half_brier: 0.201,
-    oof_logloss: 0.586,
-    oof_auc: 0.763,
-    oof_brier: 0.199,
+    model: 'Logistic regression, L2 lambda 10, 600 gradient-descent iterations, features: log TVL, age as five one-hot bands (0-179, 180-364, 365-729, 730+ days, missing listed_at), 7d growth clamped -60..+30%, chains capped at 10, one-hot category (14 categories with n >= 20). Fitted at build time from the snapshot. v4 replaces v3 log(age+1): see TESTS-v4.md.',
+    split_half_logloss: 0.577,
+    split_half_auc: 0.769,
+    split_half_brier: 0.196,
+    oof_logloss: 0.575,
+    oof_auc: 0.77,
+    oof_brier: 0.195,
     bucket_split_half_logloss: 0.666,
     bucket_split_half_auc: 0.622,
     bucket_oof_logloss: 0.662,
@@ -248,29 +259,56 @@ export const TEST_RESULTS = {
     numeric_only_split_half_logloss: 0.641,
     numeric_only_split_half_auc: 0.711,
     base_rate_logloss: 0.688,
-    // v3: calibration candidates, all evaluated HELD-OUT (5-fold OOF, seed 7; split-half
-    // 20 seeds) with the calibrator fitted inside each fold on inner out-of-fold logits.
-    // Protocol matches the shipped model exactly (growth cap +30%, 600 iterations), which
-    // is why the raw baseline here is 0.5863 / 0.5876 rather than v2's 0.586 / 0.590.
+    // v4: the age-band gain is not one fold assignment. 5-fold OOF log-loss, age-bands minus
+    // log-age, on five fold seeds: -0.0100 (seed 1), -0.0089 (seed 2), -0.0114 (seed 3),
+    // -0.0128 (seed 4), -0.0111 (seed 7). The quadratic-terms variant also beats log-age on
+    // all five seeds but by less (-0.001 to -0.007) and adds nothing once age is binned
+    // (age-bands + quadratics: OOF 0.5755 vs age-bands alone 0.5751) - the two gains overlap,
+    // they both model the age nonlinearity, so only the bands are kept. The paired OOF test
+    // on seed 7 alone has a wide interval (mean -0.0111, bootstrap 95% CI -0.0242 to +0.0023)
+    // because a few high-leverage rows dominate per-row log-loss; the five-seed and
+    // split-half (20 seeds) agreement is the evidence. Finer age bins (edges 90/180/365/730)
+    // give 0.5750 - no gain over 0.5751, so the 3-edge bands stay.
+    age_band_seed_robustness: [
+      { seed: 1, log_age_logloss: 0.5814, age_bands_logloss: 0.5714 },
+      { seed: 2, log_age_logloss: 0.5791, age_bands_logloss: 0.5702 },
+      { seed: 3, log_age_logloss: 0.5812, age_bands_logloss: 0.5698 },
+      { seed: 4, log_age_logloss: 0.5812, age_bands_logloss: 0.5684 },
+      { seed: 7, log_age_logloss: 0.5863, age_bands_logloss: 0.5751 },
+    ],
+    age_band_token_rates: [
+      { band: '0-179 days', n: 87, token_rate: 0.264 },
+      { band: '180-364 days', n: 73, token_rate: 0.397 },
+      { band: '365-729 days', n: 183, token_rate: 0.383 },
+      { band: '730+ days', n: 302, token_rate: 0.679 },
+      { band: 'listed_at missing', n: 113, token_rate: 0.788 },
+    ],
+    // v4: calibration candidates re-tested on the age-band logistic, same protocol as v3
+    // (5-fold OOF seed 7 with the calibrator fitted on inner OOF logits; split-half 20 seeds).
+    // Shrinkage w=0.95 gains 0.0013 OOF / 0.0010 split-half, Brier unchanged, ECE worse
+    // (0.0294 vs 0.0265) - inside noise, same decision as v3: not adopted. Platt and
+    // isotonic are worse held-out in both protocols; isotonic's full-fit breakpoints are
+    // again degenerate (a run of 1.0s at the top). The raw age-band logistic stays, and
+    // its ECE is better than v3's raw log-age model (0.0265 vs 0.0387).
     calibration_tested: [
-      { method: 'Raw logistic (adopted)', oof_logloss: 0.5863, oof_brier: 0.1991, oof_auc: 0.763, oof_ece: 0.0387, split_half_logloss: 0.5876, split_half_brier: 0.2001 },
-      { method: 'Platt scaling', oof_logloss: 0.588, oof_brier: 0.2001, oof_auc: 0.762, oof_ece: 0.0492, split_half_logloss: 0.5894, split_half_brier: 0.201 },
-      { method: 'Isotonic regression', oof_logloss: 0.619, oof_brier: 0.2013, oof_auc: 0.757, oof_ece: 0.0311, split_half_logloss: 0.6291, split_half_brier: 0.2027 },
-      { method: 'Shrinkage to base rate, w=0.9', oof_logloss: 0.5843, oof_brier: 0.1993, oof_auc: 0.763, oof_ece: 0.044, split_half_logloss: 0.5862, split_half_brier: 0.2003 },
+      { method: 'Raw logistic (adopted)', oof_logloss: 0.5751, oof_brier: 0.1951, oof_auc: 0.77, oof_ece: 0.0265, split_half_logloss: 0.577, split_half_brier: 0.1962 },
+      { method: 'Platt scaling', oof_logloss: 0.5771, oof_brier: 0.1958, oof_auc: 0.768, oof_ece: 0.044, split_half_logloss: 0.5783, split_half_brier: 0.1969 },
+      { method: 'Isotonic regression', oof_logloss: 0.5942, oof_brier: 0.1972, oof_auc: 0.768, oof_ece: 0.0479, split_half_logloss: 0.6442, split_half_brier: 0.2017 },
+      { method: 'Shrinkage to base rate, w=0.95', oof_logloss: 0.5738, oof_brier: 0.195, oof_auc: 0.769, oof_ece: 0.0294, split_half_logloss: 0.576, split_half_brier: 0.1961 },
     ],
     calibration_decision:
-      'No calibration adopted. Platt is worse held-out on log-loss and Brier in both protocols; isotonic is much worse (log-loss 0.619 OOF) and its full-fit breakpoints are degenerate (a run of 1.0s at the top: overfit on n=758). Shrinkage w=0.9 improves log-loss by only 0.002 in both protocols, its Brier does not improve, its ECE is worse, and the paired gain is inside noise (t=-0.65, bootstrap 95% CI -0.0086 to +0.0037). The raw logistic stays.',
+      'No calibration adopted, same as v3. Platt is worse held-out on log-loss and Brier in both protocols; isotonic is much worse (log-loss 0.5942 OOF, 0.6442 split-half) and its full-fit breakpoints are degenerate (a run of 1.0s at the top: overfit on n=758). Shrinkage w=0.95 improves log-loss by only 0.0013 OOF / 0.0010 split-half, its Brier does not improve, and its ECE is worse (0.0294 vs 0.0265) - inside noise. The raw age-band logistic stays.',
     calibration_oof_deciles: [
-      { decile: 1, predicted: 0.118, observed: 0.227 },
-      { decile: 2, predicted: 0.285, observed: 0.263 },
-      { decile: 3, predicted: 0.397, observed: 0.355 },
-      { decile: 4, predicted: 0.478, observed: 0.395 },
-      { decile: 5, predicted: 0.54, observed: 0.539 },
-      { decile: 6, predicted: 0.603, observed: 0.573 },
-      { decile: 7, predicted: 0.663, observed: 0.645 },
-      { decile: 8, predicted: 0.728, observed: 0.724 },
-      { decile: 9, predicted: 0.793, observed: 0.842 },
-      { decile: 10, predicted: 0.889, observed: 0.921 },
+      { decile: 1, predicted: 0.122, observed: 0.2 },
+      { decile: 2, predicted: 0.26, observed: 0.25 },
+      { decile: 3, predicted: 0.352, observed: 0.342 },
+      { decile: 4, predicted: 0.452, observed: 0.421 },
+      { decile: 5, predicted: 0.543, observed: 0.513 },
+      { decile: 6, predicted: 0.615, observed: 0.6 },
+      { decile: 7, predicted: 0.677, observed: 0.697 },
+      { decile: 8, predicted: 0.748, observed: 0.711 },
+      { decile: 9, predicted: 0.818, observed: 0.816 },
+      { decile: 10, predicted: 0.902, observed: 0.934 },
     ],
     category_token_rates: [
       { category: 'Risk Curators', n: 39, token_rate: 0.128 },
@@ -288,6 +326,65 @@ export const TEST_RESULTS = {
       { category: 'Dexs', n: 99, token_rate: 0.737 },
       { category: 'Lending', n: 75, token_rate: 0.787 },
     ],
+  },
+  // v4: what was tried on the value model and the ranges, and rejected - every variant refit
+  // inside each LOO fold on the trimmed 116 comps (TESTS-v4.md). Nothing beats the v3 global
+  // log-log (LOO 1.6184), so the value model is unchanged in v4. The P10-P90 fit-trim gain
+  // (1.6124) is inside noise (paired t = -1.23, bootstrap 95% CI -0.051 to +0.011).
+  v4_value_rejected: [
+    { variant: 'base global log-log (kept)', loo_log_rmse: 1.6184 },
+    { variant: '+ log(age)', loo_log_rmse: 1.6309 },
+    { variant: '+ 7d growth', loo_log_rmse: 1.6314 },
+    { variant: '+ log(age) + growth', loo_log_rmse: 1.6454 },
+    { variant: '+ quadratic log TVL', loo_log_rmse: 1.6301 },
+    { variant: '+ age x TVL interaction', loo_log_rmse: 1.6422 },
+    { variant: '+ chains count', loo_log_rmse: 1.6308 },
+    { variant: 'base + category factor k=8', loo_log_rmse: 1.642 },
+    { variant: 'per-category slope', loo_log_rmse: 1.6666 },
+    { variant: 'per-category slope + age', loo_log_rmse: 1.7463 },
+    { variant: 'Huber robust', loo_log_rmse: 1.6311 },
+    { variant: 'L1 robust', loo_log_rmse: 1.6676 },
+    { variant: 'fit trimmed P10-P90 (n=104)', loo_log_rmse: 1.6124 },
+    { variant: 'fit trimmed P2-P97 (n=122)', loo_log_rmse: 1.6227 },
+    { variant: 'fit untrimmed (n=128)', loo_log_rmse: 1.6499 },
+  ],
+  // v4: the shipped P10-P90 range is already honest. LOO coverage on the 116 trimmed comps:
+  // 91/116 = 0.784 against the 0.80 nominal. Split-conformal 80% intervals (20 random 50/50
+  // splits) cover 0.792 globally and 0.797 per-category, but at a WIDER mean log-width
+  // (4.164 / 4.196 vs the shipped 4.086) - conformal buys nothing here, so it is not adopted.
+  // The range is stated as measured, not as a promise.
+  v4_range_coverage: {
+    shipped_p10_p90_loo_coverage: 0.784,
+    shipped_p10_p90_loo_covered: 91,
+    shipped_p10_p90_loo_n: 116,
+    shipped_p10_p90_log_width: 4.086,
+    conformal_global_coverage: 0.792,
+    conformal_global_log_width: 4.164,
+    conformal_per_category_coverage: 0.797,
+    conformal_per_category_log_width: 4.196,
+    decision: 'Keep the shipped normal P10-P90 (implied / 7.72 to x 7.72). LOO coverage 78.4% vs 80% nominal is honest within one standard error, and split-conformal intervals are wider at the same coverage.',
+  },
+  // v4: board coverage under the house's pre-token rule (RULES.txt, the watchlist's own
+  // definition - see isRankable). The snapshot holds 342 pre-token records; 198 pass the
+  // rule and all 198 are on the board (40 watchlist + 158 early: 138 below the $50M floor,
+  // 20 above it that the watchlist leaves out, the largest a $2.76B Risk Curator). The 144
+  // that fail are wrapped, staked or bridged products of tokens that already trade (or
+  // versioned pools / exchange products) and are not ranked as launches. v3's board, by
+  // contrast, was 213 rows: it carried only the 173 largest below-floor rows, so it missed
+  // the 20 above-floor candidates, and it ranked 48 rule-failing rows as launches (20 Liquid
+  // Staking, 13 Bridge, 7 Canonical Bridge, the rest by name). Net v4: 198 rows, every one
+  // rule-clean. No held-out cost - the value and odds models are unchanged by the row set.
+  v4_board: {
+    rows: 198,
+    watchlist: 40,
+    early: 158,
+    early_below_floor: 138,
+    early_above_floor: 20,
+    pre_token_records: 342,
+    house_rule_pass: 198,
+    house_rule_fail: 144,
+    v3_rows_failing_rule: 48,
+    v3_early_rows: 173,
   },
 };
 
@@ -458,9 +555,30 @@ export function isPreToken(p: SnapshotProtocol): boolean {
   return p.mcap_usd === null && p.gecko_id === null && p.symbol === null;
 }
 
-/** Whether a protocol is one the board may rank: pre-token, not an exchange, not a versioned pool. */
+/** The house's own pre-token rule (RULES.txt, the watchlist's definition, applied here to every
+ * board row, not just the watchlist): a protocol is a launch candidate when it records no token
+ * AND is not a wrapped, staked or bridged product of a protocol whose token already trades.
+ * The snapshot carries no parent-protocol field, so the rule is applied with what it does
+ * carry: the category is not Bridge, Canonical Bridge, Liquid Staking, Liquid Restaking,
+ * Restaked BTC or CEX; the name does not end in a version marker; the name carries no whole
+ * word wrapped, staked or staking; the name does not begin with an exchange's name (Binance,
+ * Coinbase, Bybit, Kraken, Bitget, OKX, Bitfinex, Gemini). v4: v1-v3 applied only the CEX
+ * and version-marker parts of this rule, so v3 ranked 48 wrapped/staked/bridged products as
+ * launches (20 Liquid Staking, 13 Bridge, 7 Canonical Bridge, the rest by name) and missed
+ * the 20 genuine above-floor protocols the watchlist leaves out. The full rule is the
+ * competition's own definition, not this radar's judgment. */
+const EXCLUDED_CATEGORIES = new Set(['Bridge', 'Canonical Bridge', 'Liquid Staking', 'Liquid Restaking', 'Restaked BTC', 'CEX']);
+const EXCHANGE_PREFIXES = ['Binance', 'Coinbase', 'Bybit', 'Kraken', 'Bitget', 'OKX', 'Bitfinex', 'Gemini'];
+const WRAPPED_WORD = /\b(wrapped|staked|staking)\b/i;
+
+/** Whether a protocol is one the board may rank: pre-token under the house's rule above. */
 export function isRankable(p: SnapshotProtocol): boolean {
-  return isPreToken(p) && p.category !== 'CEX' && !VERSIONED.test(p.name);
+  if (!isPreToken(p)) return false;
+  if (p.category !== null && EXCLUDED_CATEGORIES.has(p.category)) return false;
+  if (VERSIONED.test(p.name)) return false;
+  if (WRAPPED_WORD.test(p.name)) return false;
+  if (EXCHANGE_PREFIXES.some((x) => p.name.startsWith(x))) return false;
+  return true;
 }
 
 /** The snapshot's protocol by slug. */
@@ -486,12 +604,15 @@ export const LOGISTIC_CATEGORIES: string[] = [
   'Yield Aggregator',
 ];
 
-/** Feature names of the odds logistic, in order. */
+/** Feature names of the odds logistic, in order. v4: age is five one-hot bands, not log-age. */
 export const LOGISTIC_FEATURES: string[] = [
   'log TVL',
-  'log(age in days + 1)',
   '7d growth, clamped -60..+30%',
   'chains, capped at 10',
+  'age 0-179 days',
+  'age 180-364 days',
+  'age 365-729 days',
+  'age 730+ days',
   'listed_at missing',
   ...LOGISTIC_CATEGORIES.map((c) => `category: ${c}`),
 ];
@@ -505,18 +626,23 @@ export interface LogisticModel {
   iterations: number;
 }
 
-/** The logistic's features for one protocol, unstandardized. */
+/** The logistic's features for one protocol, unstandardized. v4: age enters as five one-hot
+ * bands (0-179, 180-364, 365-729, 730+ days, missing listed_at) - see the header comment. */
 export function logisticFeatures(protocol: SnapshotProtocol, asOf: string, model: ModelConstants = MODEL): number[] {
   const age = ageDays(asOf, protocol.listed_at);
-  const ageEff = age ?? model.unknown_age_days;
   const rawGrowth = finite(protocol.change_7d, 0);
   const growth = Math.min(model.logistic_growth_cap, Math.max(model.growth_floor, rawGrowth)) / 100;
+  const bands = [0, 0, 0, 0, 0];
+  if (age === null) bands[4] = 1;
+  else if (age < 180) bands[0] = 1;
+  else if (age < 365) bands[1] = 1;
+  else if (age < 730) bands[2] = 1;
+  else bands[3] = 1;
   const feats: number[] = [
     Math.log(protocol.tvl_usd),
-    Math.log(ageEff + 1),
     growth,
     Math.min(10, protocol.chains.length),
-    age === null ? 1 : 0,
+    ...bands,
   ];
   for (const c of LOGISTIC_CATEGORIES) feats.push(protocol.category === c ? 1 : 0);
   return feats;
@@ -630,9 +756,8 @@ export function buildBoard(snapshot: Snapshot, model: ModelConstants = MODEL): B
     if (p !== undefined) chosen.set(slug, p);
   }
   const early = snapshot.protocols
-    .filter((p) => !chosen.has(p.slug) && isRankable(p) && p.tvl_usd < snapshot.floor_usd)
-    .sort((a, b) => b.tvl_usd - a.tvl_usd || (a.slug < b.slug ? -1 : a.slug > b.slug ? 1 : 0))
-    .slice(0, EARLY_ROWS);
+    .filter((p) => !chosen.has(p.slug) && isRankable(p))
+    .sort((a, b) => b.tvl_usd - a.tvl_usd || (a.slug < b.slug ? -1 : a.slug > b.slug ? 1 : 0));
   for (const p of early) chosen.set(p.slug, p);
 
   const logistic = fitLogistic(snapshot, model);

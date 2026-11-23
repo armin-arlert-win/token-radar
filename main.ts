@@ -1,18 +1,19 @@
-// Token Radar v3 (radar-v3) for make.fun token-radar-01 (Node 22, standard library only).
+// Token Radar v4 (radar-v4) for make.fun token-radar-01 (Node 22, standard library only).
 //
 // The program reads the sealed snapshot from /input/snapshot.json (or --input <file|dir>), scores every
 // pre-token protocol with the model in lib/model.ts, writes the ranked board to /output/board.json, and
 // copies this repository's dashboard/ and screenshots/ to /output. Last, it writes /output/dossier.json,
 // the summary the judge reads, with the vendored make.fun library.
 //
-// The model (radar-v3): implied value from a log-log fit of market cap on TVL
+// The model (radar-v4): implied value from a log-log fit of market cap on TVL
 // (log(mcap) = 4.002 + 0.687*log(TVL), 116 trimmed comps) times a shrunk category factor,
 // a small growth term and a maturity term; token odds from a logistic regression on all
-// 758 protocols; expected value = implied x odds. The board is ranked by implied value,
+// 758 protocols, age as five one-hot bands (v4: 0-179, 180-364, 365-729, 730+ days, missing);
+// expected value = implied x odds. The board is ranked by implied value,
 // as the sealed gate requires (sorted_by_value); every row also carries its EV rank, and
-// the dashboard's default sort is EV. 40 watchlist protocols + 173 early ones = 213 rows,
+// the dashboard's default sort is EV. 40 watchlist protocols + 158 early ones = 198 rows,
 // each with a costed farm plan (FARM / THIN / SKIP). No walk-forward is claimed: the
-// snapshot is a single date, so none exists; see TESTS-v3.md for the held-out numbers.
+// snapshot is a single date, so none exists; see TESTS-v4.md for the held-out numbers.
 //
 // The dashboard is a static page, no framework and no network: dashboard/index.html, dashboard/app.css
 // and dashboard/app.js read /output/data.js, which this program writes from the same board.

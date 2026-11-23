@@ -143,6 +143,7 @@ tbody tr[data-selected="true"] { background: color-mix(in srgb, var(--accent) 8%
 .proof { display: grid; gap: 2px; padding: var(--step-2) var(--step-3); border: 1px solid var(--border); border-radius: var(--radius-panel); background: var(--surface); }
 .proof-title { color: var(--muted); font-size: 12px; }
 .proof-big { font-family: var(--font-num); font-size: 13px; font-weight: 600; }
+.selfcheck { margin-top: var(--step-3); padding: var(--step-2) var(--step-3); border: 1px solid var(--accent); border-radius: var(--radius-panel); background: color-mix(in srgb, var(--accent) 6%, var(--surface)); font-size: 13px; color: var(--ink); }
 .integrity { margin-top: var(--step-3); padding: var(--step-2) var(--step-3); border: 1px dashed var(--border); border-radius: var(--radius-panel); font-size: 13px; color: var(--muted); }
 .verdict { display: inline-block; min-width: 52px; text-align: center; padding: 2px 8px; border-radius: 999px; font-family: var(--font-num); font-size: 12px; font-weight: 600; }
 .verdict.farm { background: var(--accent); color: var(--surface); }
