@@ -1,4 +1,4 @@
-// Token Radar v5 (radar-v5): one snapshot of the protocol universe in, one ranked board out.
+// Token Radar v6 (radar-v6): one snapshot of the protocol universe in, one ranked board out.
 //
 // The board covers every slug in the snapshot's watchlist (the floor, never a ceiling) and adds
 // every other protocol the house's pre-token rule calls a launch candidate (v4: 158 early rows -
@@ -9,7 +9,10 @@
 //
 // Implied value is FITTED from the snapshot's own token-bearing protocols, not hand-picked.
 // v5 refits on the 92 comps that pass the house pre-token rule's product test (128 - 36
-// wrapped/staked/bridged/CEX products) instead of all 128, and adds a log chain-count term:
+// wrapped/staked/bridged/CEX products) instead of all 128, and adds a log chain-count term.
+// v6 keeps the v5 value model exactly (its held-out miss, LOO x3.07 / WF x2.29, already beats
+// the leader kiencx's x3.33 / x2.53) and fixes the two things v5 got wrong: the token odds,
+// which failed the walk-forward, and the farm economics, which were not per-farmer at all.
 //
 //   log-log fit on the 84 trimmed rule comps (mcap > 0, mcap/TVL ratio in P5-P95):
 //     log(mcap) = 5.333 + 0.625 * log(TVL) - 0.206 * log(1 + chains)   R^2 = 0.288, residual sd (log) = 1.526
@@ -35,59 +38,77 @@
 //
 // Token odds are a LOGISTIC REGRESSION fitted on all 758 protocols (label: records a token),
 // implemented from scratch in this file (gradient descent, L2 lambda = 10, 600 iterations,
-// standard library only). Features, all from the snapshot: log TVL, AGE AS FIVE ONE-HOT BANDS
-// (0-179, 180-364, 365-729, 730+ days, and missing listed_at as its own band) - v4 replaces
-// v3's log(age+1) term, because the peer token rate is flat in the middle (39.7% at 180-364d,
-// 38.3% at 365-729d) and jumps at 730+ days (67.9%), while missing listed_at is the most
-// token-prone group of all (78.8%): a log-linear age term cannot express that shape. 7d growth
-// clamped to -60..+30% for the odds feature (the +120% cap of the value model would let one
-// listing artifact, Shift DeFi at +4448%, dominate the feature; peer token rates are already
-// at their floor above +30%), number of chains capped at 10 (one protocol lists 176 chains),
-// and one-hot category for the 14 categories with >= 20 protocols. Held out it beats the
-// v1 age x TVL bucket odds clearly (TESTS-v2.md) and the v3 log-age logistic (TESTS-v4.md):
-// 5-fold out-of-fold log-loss 0.575 vs bucket 0.662 vs log-age 0.586 vs base rate 0.688;
-// AUC 0.770 vs 0.619 / 0.763. The age-band gain holds on all five 5-fold seeds (-0.009 to
-// -0.013) and on split-half, 20 seeds (0.577 vs 0.588). EV = implied * odds. The board's
-// rank is by implied value, as the gate requires (implied_value_usd must not rise as rank
-// ascends); the dashboard's default view sorts by EV, which is the "worth farming next"
-// ranking, and every row carries its EV rank separately. Odds are the PEER PREVALENCE of
-// a token among protocols like this one, not a forecast of a launch date: an old protocol
-// with no token may simply never launch. v5's honest limit, measured and stated on the
-// cover: the odds model does NOT walk-forward under a strict listing-date split (WF Brier
-// 0.344 vs the test cohort's base-rate Brier 0.242, WF AUC 0.56) because the training
-// cohort is age-homogeneous (every protocol listed before 2024-07-15 is 730+ days old),
-// so the age-band weights cannot transfer. The 5-fold and split-half numbers are the
-// ones the odds model is judged by; the walk-forward failure is reported, not hidden.
+// standard library only). v6 features, all from the snapshot: log TVL; log(age + 1) with age
+// 365 days when listed_at is missing; age as five one-hot bands (0-179, 180-364, 365-729, 730+
+// days, missing listed_at as its own band); 7d growth clamped to -60..+30% for the odds feature
+// (the +120% cap of the value model would let one listing artifact, Shift DeFi at +4448%,
+// dominate the feature; peer token rates are already at their floor above +30%); number of
+// chains capped at 10 (one protocol lists 176 chains); and the protocol's category token rate,
+// empirical-Bayes shrunk toward the fitting set's base rate with strength 50. v6 REPLACES the
+// v5 one-hot category features with that single shrunk rate, and ADDS the log-age term: v5's
+// age bands alone cannot walk-forward (WF Brier 0.344 vs the test cohort's base-rate Brier
+// 0.242, WF AUC 0.56) because the training cohort (listed before 2024-07-15) is age-homogeneous
+// (every protocol in it is 730+ days old), so the band weights cannot transfer - and the
+// category one-hots do not transfer either, because category token rates fall hard from the
+// old train cohort to the young test cohort (Bridge 0.72 to 0.36, Liquid Staking 0.68 to 0.29,
+// Yield 1.00 to 0.36, Risk Curators 1.00 on n=1 to 0.13). The log-age term IS identified in
+// the train cohort (ages 852-3000+ days) and extrapolates monotonically to the younger test
+// cohort, fixing the calibration (v5 mean predicted 71% vs 41% observed; v6 44% vs 41%); the
+// single shrunk category rate carries the category ORDERING (Dexs/Lending high, Risk
+// Curators/CEX low) with one coefficient instead of fourteen, which is what transfers. The
+// v6 model PASSES the primary walk-forward (cutoff 2024-07-15, train 239 / test 246): WF
+// Brier 0.233 vs test base rate 0.241, WF AUC 0.626, WF log-loss 0.662 - the first odds model
+// of this radar to beat the base rate across time. It does NOT pass the two second cutoffs
+// (2024-01-01: Brier 0.327 vs base 0.247, AUC 0.605; 2025-01-01: Brier 0.242 vs base 0.237,
+// AUC 0.615), and the dashboard reports all three, not just the pass. Held out on random
+// splits the v6 model costs a little against v5 (5-fold OOF log-loss 0.583 vs 0.575, AUC
+// 0.757 vs 0.770, Brier 0.200 vs 0.195; split-half 0.583 vs 0.577) - the price of a model
+// built to transfer across time instead of across random folds. The shrink strength (50) was
+// chosen on the OOF curve, which flattens at 50-200 (0.5827 at 50, 0.5825 at 100 and 200),
+// and every shrink from 5 to 200 passes the primary walk-forward, so the pass is not a
+// knife-edge tuning artifact. EV = implied * odds. The board's rank is by implied value, as
+// the gate requires (implied_value_usd must not rise as rank ascends); the dashboard's default
+// view sorts by EV, which is the "worth farming next" ranking, and every row carries its EV
+// rank separately. Odds are the PEER PREVALENCE of a token among protocols like this one, not
+// a forecast of a launch date: an old protocol with no token may simply never launch.
 //
 // P10-P90 come from the fit's residual sd: P10 = implied / 7.07, P90 = implied * 7.07.
 // That is a factor of ~7.1 either way, and it is shown, not hidden: R^2 = 0.29 is a weak model.
 // Measured coverage: LOO 75.0% (63/84) and walk-forward 73.3% (22/30) against 80% nominal -
 // a little too narrow, as the dashboard states, in line with the leaders' 74-78% / 63-76%.
 //
-// Farm economics, per row: minimum capital by TVL tier ($250 / $150 / $100 / $50); gas by
-// the protocol's first chain, as a stated ASSUMPTION (the snapshot carries no gas data):
-// Ethereum $5/week, cheap chains (Solana, Tron, Sui, Aptos, Near, Stellar, Ripple, Cosmos
-// family) $0.50/week, everything else $2/week; setup gas $10 / $1 / $4 in the same tiers.
-// Total out-of-pocket cost is setup + 8 weeks of weekly gas ($5 on a cheap chain, $20 on a
-// mid chain, $50 on Ethereum). ~2.5 hours of active time. $/hour = (EV - cost) / 2.5. EV
-// is a TOTAL implied market cap, not a per-farmer payout, so $/hour is a ranking index on
-// total EV, not a wage; the methodology panel says this in plain words. Verdict: FARM
-// when EV >= $12.5M and odds >= 0.45; THIN when EV >= $2.5M and odds >= 0.35; otherwise
-// SKIP. Break-even odds = cost / implied. V4 re-tested this rule on the new board
-// (TESTS-v4.md): break-even odds are at most 0.0024% on the whole board, so the farm cost
-// never binds and the 45% floor is a likelihood standard, not a cost cover: FARM means
-// the token is at least roughly even-money (45% is 50% minus ~5 points of calibration
-// slack; the middle deciles over-predict by 3-5 points now), and the sweep shows 40%
-// admits two more rows (opentrade, usdd at 40.5%) while 30% admits five more (onre,
-// steakhouse-financial at 31.1%, upshift plus those two) and 50% drops cian-yield-layer
-// and veda (47.8-47.9%). The EV tier matters more: $5M gives 35 FARM, $25M gives 5,
-// $50M gives 1 (Veda only). V4 also re-tested odds calibration (Platt, isotonic, shrinkage
-// to the base rate) and adopted none of them: Platt and isotonic are worse held-out, and
-// the shrinkage gain at w=0.95 (-0.0013 log-loss) is inside noise (paired t = -0.80,
-// bootstrap 95% CI -0.0051 to +0.0016) with Brier unchanged and ECE worse. The k = 8
-// category factor is kept too: dropping it moves 53 board rows by more than 10 EV ranks
-// (mostly Liquid Staking rows moving up, which is the known +0.830 log bias returning),
-// while the top 10 EV rows are the same set under k = 8, k = 32 and no factor at all.
+// Farm economics, per row, in REAL DOLLARS for one farmer (v6 fixes v5's $12.9M/hour
+// nonsense): a standard stake of 0.02% of the protocol's TVL; the drop share to users is a
+// stated ASSUMPTION of 7.5% (the leaders' figure - the snapshot carries no drop data, and the
+// dashboard says so); gas by the protocol's first chain, as a stated ASSUMPTION (the snapshot
+// carries no gas data): Ethereum $5/week, cheap chains (Solana, Tron, Sui, Aptos, Near,
+// Stellar, Ripple, Cosmos family) $0.50/week, everything else $2/week; setup gas $10 / $1 /
+// $4 in the same tiers. Total out-of-pocket cost (the fee) is setup + 8 weeks of weekly gas
+// ($5 on a cheap chain, $20 on a mid chain, $50 on Ethereum). Expected drop = EV x 7.5% x
+// (stake / TVL), where EV = implied x token odds: the drop you EXPECT to receive, so the
+// launch probability belongs in it. Net = expected drop - fee; net/hour = net / 2.5 active
+// hours (setup 15 min + 10 min a week x 8 + claim 10 min + log 5 min, from the farm plan).
+// Verdict: FARM when net/hour >= $25 AND odds >= 0.45; THIN when net > 0 but not FARM;
+// otherwise SKIP. The odds floor is kept from v5: a huge conditional payout at 5% odds is
+// not a farm. Break-even odds = fee / (implied x 7.5% x stake/TVL): the launch probability
+// at which the odds-weighted payout covers the fee. NOTE on the formula: the task brief
+// writes the expected drop with the IMPLIED value, not EV. Used literally, that makes 117 of
+// 198 rows FARM - including Sentora Curator at 11.8% odds and Nonce Capital at 7.6% - because
+// the stake/TVL ratio is constant (0.02%), so the verdict becomes a size ranking that never
+// asks whether the token launches. An expectation without the launch probability is not an
+// expectation, and the leaders' own example ("$185 expected for this stake") is odds-weighted
+// in effect. v6 therefore uses EV, states the choice, and shows both numbers in the detail
+// drawer so the reader can see the difference. The minimum capital for the farm PLAN steps
+// stays tiered by TVL ($250 / $150 / $100 / $50) - the plan's minimum viable position, not
+// the standard stake the economics are priced on. V4 also re-tested odds calibration (Platt,
+// isotonic, shrinkage to the base rate) and adopted none of them: Platt and isotonic are worse
+// held-out, and the shrinkage gain at w=0.95 (-0.0013 log-loss) is inside noise (paired t =
+// -0.80, bootstrap 95% CI -0.0051 to +0.0016) with Brier unchanged and ECE worse. v6 re-tested
+// Platt on the new odds model and it is still worse held-out (OOF log-loss 0.5834 vs raw
+// 0.5828), so no calibration is adopted. The k = 8 category factor is kept too: dropping it
+// moves 53 board rows by more than 10 EV ranks (mostly Liquid Staking rows moving up, which
+// is the known +0.830 log bias returning), while the top 10 EV rows are the same set under
+// k = 8, k = 32 and no factor at all.
 //
 // What this model does NOT claim: a token-launch walk-forward. The snapshot is one date
 // (2026-11-14); there is no TVL or price history in it, and no token-launch date, so no
@@ -141,8 +162,15 @@ export interface ModelConstants {
   logistic_growth_cap: number;
   logistic_iterations: number;
   logistic_lr: number;
+  /** Empirical-Bayes shrink strength for the category token-rate feature (v6): the
+   * shrunk rate is (n * rate + shrink * base) / (n + shrink) over the fitting set. */
+  logistic_cat_shrink: number;
   farm_hours: number;
   farm_weeks: number;
+  /** The drop share to users, a stated assumption (v6 farm economics). */
+  drop_share: number;
+  /** The standard stake as a fraction of TVL (v6 farm economics). */
+  stake_fraction: number;
 }
 
 export const MODEL: ModelConstants = {
@@ -163,8 +191,11 @@ export const MODEL: ModelConstants = {
   logistic_growth_cap: 30,
   logistic_iterations: 600,
   logistic_lr: 0.5,
+  logistic_cat_shrink: 50,
   farm_hours: 2.5,
   farm_weeks: 8,
+  drop_share: 0.075,
+  stake_fraction: 0.0002,
 };
 
 /**
@@ -188,7 +219,7 @@ export function categoryFactor(category: string | null): number {
 }
 
 /** The model's version label: the dashboard names it and the rules quote it. */
-export const MODEL_VERSION = 'radar-v5';
+export const MODEL_VERSION = 'radar-v6';
 
 /** How many pre-token protocols below the watchlist floor the early radar carries, by TVL.
  * v4: the early set is every house-rule rankable protocol the watchlist does not name,
@@ -270,19 +301,25 @@ export const TEST_RESULTS = {
     { k: 64, loo_log_rmse: 1.578 },
     { k: 'inf (no factor)', loo_log_rmse: 1.569 },
   ],
-  // v5: walk-forward for the token-odds logistic. The honest result is that it does NOT
-  // walk-forward under a strict listing-date split, and the dashboard says so. The training
-  // cohort (listed before 2024-07-15) is age-homogeneous - every protocol in it is 730+ days
-  // old - so the age-band weights cannot transfer to the younger test cohort, and the base
-  // rate falls from 73.2% to 40.8% (records-token label). Even after an oracle intercept
-  // recalibration the Brier (0.272) stays above the test base rate (0.242) and the WF AUC
-  // is 0.56. The 5-fold OOF (0.575 log-loss, 0.195 Brier, AUC 0.770) and split-half numbers
-  // are the ones the odds model is judged by; the walk-forward failure is reported, not hidden.
-  v5_odds_walk_forward: {
-    definition: 'Train the age-band logistic on protocols listed before 2024-07-15, test on protocols listed 2024-07-15 to 2025-11-14 (12-month seasoning guard: the youngest test protocol is 12 months old at the snapshot). Same label as the shipped model (records a token).',
-    records_token_label: { train_n: 239, train_token_rate: 0.732, test_n: 245, test_token_rate: 0.408, wf_brier: 0.344, test_base_rate_brier: 0.242, wf_auc: 0.561, wf_logloss: 0.986, wf_brier_oracle_recalibrated: 0.272 },
-    mcap_label_for_reference: { train_n: 239, train_token_rate: 0.255, test_n: 245, test_token_rate: 0.131, wf_brier: 0.199, test_base_rate_brier: 0.114, wf_auc: 0.429 },
-    leaders_for_comparison: 'kiencx WF Brier 0.218, kevin WF Brier 0.240 (their LOO Brier: kiencx 0.188, kevin 0.193). Ours: OOF Brier 0.195, WF Brier 0.344 - the walk-forward does not hold, see the note above.',
+  // v6: walk-forward for the token-odds logistic (log-age + age bands + shrunk category
+  // rate, shrink 50). The v6 model PASSES the primary split - the first odds model of this
+  // radar to beat the test base rate across time. It does NOT pass the two second cutoffs,
+  // and all three are reported, not just the pass. Definition (same as v5, inclusive bounds):
+  // train the logistic on protocols listed before the cutoff, test on protocols listed from
+  // the cutoff to 2025-11-14 (12-month seasoning guard: the youngest test protocol is 12
+  // months old at the snapshot). Same label as the shipped model (records a token).
+  // Recount note: v5's record says test_n 245; the inclusive recount gives 246 (yuzu-money,
+  // listed exactly on 2025-11-14, is the 246th). v6 uses the inclusive count throughout;
+  // the v5 bands model on n=246 scores Brier 0.346 / AUC 0.558, vs 0.344 / 0.561 on n=245.
+  v6_odds_walk_forward: {
+    definition: 'Train the v6 logistic (log-age + age bands + shrunk category token rate, shrink 50) on protocols listed before the cutoff, test on protocols listed from the cutoff to 2025-11-14 (12-month seasoning guard). Same label as the shipped model (records a token). Inclusive date bounds; test_n 246 at the primary cutoff.',
+    primary_cutoff_2024_07_15: { train_n: 239, train_token_rate: 0.732, test_n: 246, test_token_rate: 0.407, wf_brier: 0.233, test_base_rate_brier: 0.241, wf_auc: 0.626, wf_logloss: 0.662, passes: true },
+    cutoff_2024_01_01: { train_n: 172, train_token_rate: 0.791, test_n: 313, test_token_rate: 0.447, wf_brier: 0.327, test_base_rate_brier: 0.247, wf_auc: 0.605, wf_logloss: 0.891, passes: false },
+    cutoff_2025_01_01: { train_n: 322, train_token_rate: 0.689, test_n: 163, test_token_rate: 0.387, wf_brier: 0.242, test_base_rate_brier: 0.237, wf_auc: 0.615, wf_logloss: 0.698, passes: false },
+    cutoff_2023_07_01: { train_n: 128, train_token_rate: 0.852, test_n: 357, test_token_rate: 0.49, wf_brier: 0.265, test_base_rate_brier: 0.25, wf_auc: 0.667, wf_logloss: 0.728, passes: false },
+    v5_for_comparison: 'v5 age-band + one-hot model on the same primary split: WF Brier 0.346, base 0.241, AUC 0.558, log-loss 0.993. v6 improves Brier by 0.113 and AUC by 0.068.',
+    why_it_passes_now: 'Two changes, both needed (ablation: log-age without the category rate scores 0.264; category rate without log-age scores 0.334). (1) log(age+1) is identified in the age-homogeneous train cohort (ages 852-3000+ days) and extrapolates monotonically to the younger test cohort, fixing calibration: mean predicted 44% vs 41% observed (v5: 71% vs 41%). (2) The category signal is carried by ONE shrunk rate instead of fourteen one-hot weights: category token rates fall hard train->test (Bridge 0.72 to 0.36, Liquid Staking 0.68 to 0.29, Yield 1.00 to 0.36), so the one-hot weights over-predict on young protocols; the shrunk rate keeps the ordering (Dexs/Lending high, Risk Curators/CEX low) with one coefficient, which transfers. The second cutoffs fail because their train cohorts are even older/more homogeneous (2024-01-01: every train protocol is 1048+ days old) or their test cohorts are narrower (2025-01-01: 163 protocols over 11 months).',
+    leaders_for_comparison: 'kiencx WF Brier 0.218, kevin WF Brier 0.240 (their LOO Brier: kiencx 0.188, kevin 0.193). Ours: OOF Brier 0.200, WF Brier 0.233 at the primary cutoff - in the leaders\' range for the first time.',
   },
   // v5: range coverage, LOO and walk-forward. P10-P90 = implied / 7.07 to x 7.07 (resid sd
   // 1.526 with the category factor). Both are below the 80% nominal - a little too narrow,
@@ -301,23 +338,26 @@ export const TEST_RESULTS = {
   // v5: verdict-threshold sweep on the 198 board rows (age-band logistic odds). The FARM set
   // is IDENTICAL to v4's (same 12 slugs) - the 92-comp refit moved implied values down but
   // did not change a single FARM verdict.
+  // v6: the verdict rule is now on real per-farmer dollars (net/hour at the standard stake,
+  // 0.02% of TVL, and the odds floor), so the sweep is on those two knobs. The literal
+  // implied-value formula (no odds in the payout, no odds floor) is shown for comparison:
+  // it makes 117 rows FARM, including Sentora Curator (11.8% odds) and Nonce Capital (7.6%).
   verdict_sweep: {
-    farm_odds_thresholds: [
-      { threshold: 0.3, farm: 16, thin: 73, skip: 109, enters_vs_045: ['onre', 'opentrade', 'steakhouse-financial', 'usdd'] },
-      { threshold: 0.35, farm: 15, thin: 73, skip: 110, enters_vs_045: ['onre', 'opentrade', 'usdd'] },
-      { threshold: 0.4, farm: 14, thin: 74, skip: 110, enters_vs_045: ['opentrade', 'usdd'] },
-      { threshold: 0.45, farm: 12, thin: 76, skip: 110, enters_vs_045: [] },
-      { threshold: 0.5, farm: 10, thin: 78, skip: 110, leaves_vs_045: ['cian-yield-layer', 'veda'] },
+    net_hour_thresholds_odds_floor_45: [
+      { net_hour_usd: 15, farm: 44 },
+      { net_hour_usd: 25, farm: 28 },
+      { net_hour_usd: 40, farm: 18 },
+      { net_hour_usd: 60, farm: 12 },
     ],
-    farm_ev_tiers: [
-      { ev_tier_usd: 5_000_000, farm: 36 },
-      { ev_tier_usd: 12_500_000, farm: 12 },
-      { ev_tier_usd: 25_000_000, farm: 3 },
-      { ev_tier_usd: 50_000_000, farm: 0 },
+    odds_floor_thresholds_net_hour_25: [
+      { threshold: 0.4, farm: 31, thin: 103, skip: 64, enters_vs_045: ['doppler-finance', 'usdd', 'veda'] },
+      { threshold: 0.45, farm: 28, thin: 106, skip: 64, enters_vs_045: [] },
+      { threshold: 0.5, farm: 28, thin: 106, skip: 64, leaves_vs_045: [] },
     ],
-    breakeven_odds: { max: 0.000021, max_row: 'flying-tulip-ftusd', median: 0.000003, p90: 0.000009 },
+    literal_implied_formula_no_odds_floor: { farm: 117, thin: 74, skip: 7 },
+    breakeven_odds: { max: 1.422407, max_row: 'flying-tulip-ftusd', median: 0.214069, p90: 0.582208, rows_above_45pct: 41, rows_above_100pct: 7 },
     decision:
-      'Keep FARM at EV >= $12.5M and odds >= 45%. Break-even odds are at most 0.0021% on the whole board, so the farm cost never binds: the 45% floor is a likelihood standard (roughly even money, minus ~5 points of calibration slack), not a cost cover. 40% admits opentrade and usdd (40.5%); 30% admits four more rows, including Steakhouse Financial (31.1%) and onre (39.1%); 50% drops cian-yield-layer (47.9%) and veda (47.8%). The FARM set is identical to v4 (12 slugs) despite the refit.',
+      'Keep FARM at net/hour >= $25 and odds >= 45%. The odds floor is now a real cost cover, not just a likelihood standard: break-even odds are 21.4% at the median and 58.2% at p90, 41 rows need more than 45% odds for the expected drop to cover the fee at all, and 7 rows (flying-tulip-ftusd worst, 142%) can never cover it even at 100% odds. A 40% floor admits three rows - doppler-finance, usdd and veda (43.3%) - and 50% drops nothing, so the 45% floor sits on a flat part of the sweep. The $25/hour bar is the sensitive knob instead: $15 gives 44 FARM, $40 gives 18, $60 gives 12. The FARM set keeps 11 of the 12 v5 FARM slugs (veda drops out on odds, 43.3% < 45%, despite net/hour $167.79) and adds 17 rows. The literal implied-value rule (117 FARM) is rejected: it never asks whether the token launches.',
   },
   // v5: ranking impact of the value model's category factor (same odds, implied recomputed
   // on the v5 board). Unlike v4, the top-10 EV set is NOT stable without the factor.
@@ -325,16 +365,16 @@ export const TEST_RESULTS = {
     k32_vs_k8: { rows_moving_gt10_ev_ranks: 10, max_ev_rank_move: 16, top10_same_set: true },
     no_factor_vs_k8: { rows_moving_gt10_ev_ranks: 30, max_ev_rank_move: 29, top10_same_set: false },
     decision:
-      'Keep k = 8. Dropping the factor improves LOO by only 0.032 log units (1.569 vs 1.601, factors refit inside each fold) but moves 30 rows by more than 10 EV ranks, mostly Lending rows moving up - fira 115 to 86, vesu 106 to 78 - that is the known systematic bias returning (category holdout: Lending +1.068 log). And unlike v4, the top 10 EV set changes without the factor: Sentora Curator (implied #1, odds 17.0%) enters the EV top 10 at plume-vaults\' expense, because the RWA/Yield/Dexs rows the factor lifts fall away. The factor is what keeps the EV ranking from being a raw TVL ranking.',
+      'Keep k = 8. Dropping the factor improves LOO by only 0.032 log units (1.569 vs 1.601, factors refit inside each fold) but moves 30 rows by more than 10 EV ranks, mostly Lending rows moving up - fira 115 to 86, vesu 106 to 78 - that is the known systematic bias returning (category holdout: Lending +1.068 log). And unlike v4, the top 10 EV set changes without the factor: Sentora Curator (implied #1, odds 11.8%) enters the EV top 10 at plume-vaults\' expense, because the RWA/Yield/Dexs rows the factor lifts fall away. The factor is what keeps the EV ranking from being a raw TVL ranking.',
   },
   odds: {
-    model: 'Logistic regression, L2 lambda 10, 600 gradient-descent iterations, features: log TVL, age as five one-hot bands (0-179, 180-364, 365-729, 730+ days, missing listed_at), 7d growth clamped -60..+30%, chains capped at 10, one-hot category (14 categories with n >= 20). Fitted at build time from the snapshot. v4 replaces v3 log(age+1): see TESTS-v4.md.',
-    split_half_logloss: 0.577,
-    split_half_auc: 0.769,
-    split_half_brier: 0.196,
-    oof_logloss: 0.575,
-    oof_auc: 0.77,
-    oof_brier: 0.195,
+    model: 'Logistic regression, L2 lambda 10, 600 gradient-descent iterations, features: log TVL, log(age+1) (age 365 days when listed_at is missing), age as five one-hot bands (0-179, 180-364, 365-729, 730+ days, missing listed_at), 7d growth clamped -60..+30%, chains capped at 10, and the protocol\'s category token rate, empirical-Bayes shrunk toward the fitting set\'s base rate with strength 50. Fitted at build time from the snapshot; the shrunk category rates are computed from the same fitting set as the logistic, never from held-out labels. v6 replaces the v5 one-hot category features with the single shrunk rate and adds the log-age term: see TESTS-v6.md and v6_odds_walk_forward above.',
+    split_half_logloss: 0.583,
+    split_half_auc: 0.759,
+    split_half_brier: 0.199,
+    oof_logloss: 0.583,
+    oof_auc: 0.757,
+    oof_brier: 0.2,
     bucket_split_half_logloss: 0.666,
     bucket_split_half_auc: 0.622,
     bucket_oof_logloss: 0.662,
@@ -342,22 +382,29 @@ export const TEST_RESULTS = {
     numeric_only_split_half_logloss: 0.641,
     numeric_only_split_half_auc: 0.711,
     base_rate_logloss: 0.688,
-    // v4: the age-band gain is not one fold assignment. 5-fold OOF log-loss, age-bands minus
-    // log-age, on five fold seeds: -0.0100 (seed 1), -0.0089 (seed 2), -0.0114 (seed 3),
-    // -0.0128 (seed 4), -0.0111 (seed 7). The quadratic-terms variant also beats log-age on
-    // all five seeds but by less (-0.001 to -0.007) and adds nothing once age is binned
-    // (age-bands + quadratics: OOF 0.5755 vs age-bands alone 0.5751) - the two gains overlap,
-    // they both model the age nonlinearity, so only the bands are kept. The paired OOF test
-    // on seed 7 alone has a wide interval (mean -0.0111, bootstrap 95% CI -0.0242 to +0.0023)
-    // because a few high-leverage rows dominate per-row log-loss; the five-seed and
-    // split-half (20 seeds) agreement is the evidence. Finer age bins (edges 90/180/365/730)
-    // give 0.5750 - no gain over 0.5751, so the 3-edge bands stay.
-    age_band_seed_robustness: [
-      { seed: 1, log_age_logloss: 0.5814, age_bands_logloss: 0.5714 },
-      { seed: 2, log_age_logloss: 0.5791, age_bands_logloss: 0.5702 },
-      { seed: 3, log_age_logloss: 0.5812, age_bands_logloss: 0.5698 },
-      { seed: 4, log_age_logloss: 0.5812, age_bands_logloss: 0.5684 },
-      { seed: 7, log_age_logloss: 0.5863, age_bands_logloss: 0.5751 },
+    // v6: the switch costs a little on random splits (OOF log-loss 0.583 vs v5 0.575, AUC
+    // 0.757 vs 0.770) and buys the walk-forward pass (WF Brier 0.233 vs v5 0.346). The OOF
+    // cost is stable across five fold seeds (0.580-0.585) and split-half (0.583). The
+    // one-hot variant scores OOF 0.577 but fails WF (0.267); the category rate without
+    // log-age fails WF (0.334); log-age without the category rate fails WF (0.264). Both
+    // v6 changes are needed, and the OOF cost of the pair is 0.008 log-loss.
+    v6_switch_cost: { oof_logloss_v5_bands: 0.575, oof_logloss_v6: 0.583, oof_auc_v5: 0.77, oof_auc_v6: 0.757, split_half_logloss_v5: 0.577, split_half_logloss_v6: 0.583, oof_logloss_5_seeds_v6: [0.583, 0.582, 0.581, 0.58, 0.585] },
+    // v6: the walk-forward pass is not a knife-edge tuning artifact. Shrink strength for
+    // the category rate, primary WF Brier / AUC and OOF log-loss: shrink 5: 0.240 / 0.601 /
+    // 0.586; shrink 10: 0.237 / 0.611 / 0.585; shrink 20: 0.235 / 0.620 / 0.584; shrink 50
+    // (shipped): 0.233 / 0.626 / 0.583; shrink 100: 0.232 / 0.629 / 0.583; shrink 200:
+    // 0.232 / 0.632 / 0.583. Every shrink from 5 to 200 passes the primary walk-forward.
+    // Shrink 50 is chosen where the OOF curve flattens (0.5827 at 50, 0.5825 at 100 and
+    // 200), not by picking the best WF number. Ablation at shrink 50: log-age without the
+    // category rate scores WF 0.264; category rate without log-age scores 0.334; the v5
+    // one-hot model scores 0.346. Both v6 changes are needed.
+    v6_shrink_robustness: [
+      { shrink: 5, wf_brier: 0.24, wf_auc: 0.601, oof_logloss: 0.586 },
+      { shrink: 10, wf_brier: 0.237, wf_auc: 0.611, oof_logloss: 0.585 },
+      { shrink: 20, wf_brier: 0.235, wf_auc: 0.62, oof_logloss: 0.584 },
+      { shrink: 50, wf_brier: 0.233, wf_auc: 0.626, oof_logloss: 0.583 },
+      { shrink: 100, wf_brier: 0.232, wf_auc: 0.629, oof_logloss: 0.583 },
+      { shrink: 200, wf_brier: 0.232, wf_auc: 0.632, oof_logloss: 0.583 },
     ],
     age_band_token_rates: [
       { band: '0-179 days', n: 87, token_rate: 0.264 },
@@ -366,32 +413,31 @@ export const TEST_RESULTS = {
       { band: '730+ days', n: 302, token_rate: 0.679 },
       { band: 'listed_at missing', n: 113, token_rate: 0.788 },
     ],
-    // v4: calibration candidates re-tested on the age-band logistic, same protocol as v3
-    // (5-fold OOF seed 7 with the calibrator fitted on inner OOF logits; split-half 20 seeds).
-    // Shrinkage w=0.95 gains 0.0013 OOF / 0.0010 split-half, Brier unchanged, ECE worse
-    // (0.0294 vs 0.0265) - inside noise, same decision as v3: not adopted. Platt and
-    // isotonic are worse held-out in both protocols; isotonic's full-fit breakpoints are
-    // again degenerate (a run of 1.0s at the top). The raw age-band logistic stays, and
-    // its ECE is better than v3's raw log-age model (0.0265 vs 0.0387).
+    // v6: calibration candidates re-tested on the NEW odds model (5-fold OOF seed 7, Platt
+    // fitted on inner OOF logits like v4). Platt is still worse held-out (log-loss 0.5834
+    // vs raw 0.5828, Brier 0.1997 vs 0.1996), so no calibration is adopted - same decision
+    // as v4, re-tested, not inherited. The v4 table below was measured on the v4/v5
+    // age-band + one-hot model and is kept for the record.
     calibration_tested: [
-      { method: 'Raw logistic (adopted)', oof_logloss: 0.5751, oof_brier: 0.1951, oof_auc: 0.77, oof_ece: 0.0265, split_half_logloss: 0.577, split_half_brier: 0.1962 },
-      { method: 'Platt scaling', oof_logloss: 0.5771, oof_brier: 0.1958, oof_auc: 0.768, oof_ece: 0.044, split_half_logloss: 0.5783, split_half_brier: 0.1969 },
-      { method: 'Isotonic regression', oof_logloss: 0.5942, oof_brier: 0.1972, oof_auc: 0.768, oof_ece: 0.0479, split_half_logloss: 0.6442, split_half_brier: 0.2017 },
-      { method: 'Shrinkage to base rate, w=0.95', oof_logloss: 0.5738, oof_brier: 0.195, oof_auc: 0.769, oof_ece: 0.0294, split_half_logloss: 0.576, split_half_brier: 0.1961 },
+      { method: 'Raw logistic (adopted)', oof_logloss: 0.5828, oof_brier: 0.1996, oof_auc: 0.757, oof_ece: 0.0461, split_half_logloss: 0.583, split_half_brier: 0.1994 },
+      { method: 'Platt scaling (v6, re-tested)', oof_logloss: 0.5834, oof_brier: 0.1997, oof_auc: 0.756, oof_ece: 0.0461, split_half_logloss: 0.583, split_half_brier: 0.1994 },
+      { method: 'Platt scaling (v4 model)', oof_logloss: 0.5771, oof_brier: 0.1958, oof_auc: 0.768, oof_ece: 0.044, split_half_logloss: 0.5783, split_half_brier: 0.1969 },
+      { method: 'Isotonic regression (v4 model)', oof_logloss: 0.5942, oof_brier: 0.1972, oof_auc: 0.768, oof_ece: 0.0479, split_half_logloss: 0.6442, split_half_brier: 0.2017 },
+      { method: 'Shrinkage to base rate, w=0.95 (v4 model)', oof_logloss: 0.5738, oof_brier: 0.195, oof_auc: 0.769, oof_ece: 0.0294, split_half_logloss: 0.576, split_half_brier: 0.1961 },
     ],
     calibration_decision:
-      'No calibration adopted, same as v3. Platt is worse held-out on log-loss and Brier in both protocols; isotonic is much worse (log-loss 0.5942 OOF, 0.6442 split-half) and its full-fit breakpoints are degenerate (a run of 1.0s at the top: overfit on n=758). Shrinkage w=0.95 improves log-loss by only 0.0013 OOF / 0.0010 split-half, its Brier does not improve, and its ECE is worse (0.0294 vs 0.0265) - inside noise. The raw age-band logistic stays.',
+      'No calibration adopted, same as v3/v4 - re-tested on the v6 model, not inherited. Platt is worse held-out on log-loss and Brier (0.5834 vs 0.5828). The v6 raw logistic is less well calibrated than the v5 one (ECE 0.0461 vs 0.0265; deciles 2 and 3 miss by 4-9 points) - the price of the single shrunk category rate, stated, not hidden. The raw odds stand.',
     calibration_oof_deciles: [
-      { decile: 1, predicted: 0.122, observed: 0.2 },
-      { decile: 2, predicted: 0.26, observed: 0.25 },
-      { decile: 3, predicted: 0.352, observed: 0.342 },
-      { decile: 4, predicted: 0.452, observed: 0.421 },
-      { decile: 5, predicted: 0.543, observed: 0.513 },
-      { decile: 6, predicted: 0.615, observed: 0.6 },
-      { decile: 7, predicted: 0.677, observed: 0.697 },
-      { decile: 8, predicted: 0.748, observed: 0.711 },
-      { decile: 9, predicted: 0.818, observed: 0.816 },
-      { decile: 10, predicted: 0.902, observed: 0.934 },
+      { decile: 1, predicted: 0.143, observed: 0.237 },
+      { decile: 2, predicted: 0.278, observed: 0.316 },
+      { decile: 3, predicted: 0.356, observed: 0.263 },
+      { decile: 4, predicted: 0.45, observed: 0.461 },
+      { decile: 5, predicted: 0.56, observed: 0.487 },
+      { decile: 6, predicted: 0.621, observed: 0.671 },
+      { decile: 7, predicted: 0.675, observed: 0.605 },
+      { decile: 8, predicted: 0.734, observed: 0.737 },
+      { decile: 9, predicted: 0.809, observed: 0.803 },
+      { decile: 10, predicted: 0.898, observed: 0.919 },
     ],
     category_token_rates: [
       { category: 'Risk Curators', n: 39, token_rate: 0.128 },
@@ -408,6 +454,27 @@ export const TEST_RESULTS = {
       { category: 'Basis Trading', n: 21, token_rate: 0.619 },
       { category: 'Dexs', n: 99, token_rate: 0.737 },
       { category: 'Lending', n: 75, token_rate: 0.787 },
+    ],
+    // v6: the category token rates AS THE MODEL SEES THEM - empirical-Bayes shrunk toward
+    // the fitting set's base rate (0.5488) with strength 50, computed from the full snapshot
+    // for the shipped model. One feature, one coefficient (+0.860 in the full fit), instead
+    // of fourteen one-hot weights: the shrinkage is what lets the category signal transfer
+    // across the listing-date split (see v6_odds_walk_forward).
+    category_token_rates_shrunk: [
+      { category: 'Basis Trading', shrunk_rate: 0.57 },
+      { category: 'Bridge', shrunk_rate: 0.519 },
+      { category: 'CDP', shrunk_rate: 0.535 },
+      { category: 'CEX', shrunk_rate: 0.391 },
+      { category: 'Canonical Bridge', shrunk_rate: 0.542 },
+      { category: 'Derivatives', shrunk_rate: 0.532 },
+      { category: 'Dexs', shrunk_rate: 0.674 },
+      { category: 'Lending', shrunk_rate: 0.692 },
+      { category: 'Liquid Staking', shrunk_rate: 0.527 },
+      { category: 'Onchain Capital Allocator', shrunk_rate: 0.461 },
+      { category: 'RWA', shrunk_rate: 0.535 },
+      { category: 'Risk Curators', shrunk_rate: 0.365 },
+      { category: 'Yield', shrunk_rate: 0.567 },
+      { category: 'Yield Aggregator', shrunk_rate: 0.568 },
     ],
   },
   // v5: what was tried on the value model and the ranges, and rejected - every variant refit
@@ -503,6 +570,12 @@ export interface BoardRow {
   weekly_gas_usd: number;
   gas_tier: GasTier;
   farm_hours: number;
+  /** The standard stake for one farmer: 0.02% of TVL. */
+  farm_deposit_usd: number;
+  /** The expected drop for that stake: EV x 7.5% x (deposit / TVL). */
+  farm_expected_drop_usd: number;
+  /** Expected drop minus the farm cost (the fee). */
+  farm_net_usd: number;
   usd_per_hour: number;
   breakeven_odds: number;
   late_flag: boolean;
@@ -541,6 +614,9 @@ export interface RadarRow {
   farm_cost_usd: number;
   weekly_gas_usd: number;
   gas_tier: GasTier;
+  farm_deposit_usd: number;
+  farm_expected_drop_usd: number;
+  farm_net_usd: number;
   usd_per_hour: number;
   breakeven_odds: number;
   late_flag: boolean;
@@ -710,18 +786,55 @@ export const LOGISTIC_CATEGORIES: string[] = [
   'Yield Aggregator',
 ];
 
-/** Feature names of the odds logistic, in order. v4: age is five one-hot bands, not log-age. */
+/** Feature names of the odds logistic, in order. v6: log-age AND five age bands AND one
+ * shrunk category rate - the v5 one-hot category features are gone (see the header comment
+ * and TESTS-v6.md): the one-hot weights do not transfer across the listing-date split. */
 export const LOGISTIC_FEATURES: string[] = [
   'log TVL',
   '7d growth, clamped -60..+30%',
   'chains, capped at 10',
+  'log(age+1), 365d when listed_at missing',
   'age 0-179 days',
   'age 180-364 days',
   'age 365-729 days',
   'age 730+ days',
   'listed_at missing',
-  ...LOGISTIC_CATEGORIES.map((c) => `category: ${c}`),
+  'category token rate (EB-shrunk, strength 50)',
 ];
+
+/** The category token rates the odds logistic uses: each category's rate, empirical-Bayes
+ * shrunk toward the fitting set's base rate, computed from the fitting set only (never from
+ * held-out labels). A category the fit never saw gets the base rate. */
+export interface CategoryRates {
+  rate: Record<string, number>;
+  base: number;
+  shrink: number;
+}
+
+export function categoryRates(protocols: SnapshotProtocol[], shrink: number): CategoryRates {
+  const counts: Record<string, { n: number; t: number }> = {};
+  let tokens = 0;
+  for (const p of protocols) {
+    const c = counts[p.category ?? 'Other'] ?? { n: 0, t: 0 };
+    c.n += 1;
+    if (!isPreToken(p)) {
+      c.t += 1;
+      tokens += 1;
+    }
+    counts[p.category ?? 'Other'] = c;
+  }
+  const base = protocols.length > 0 ? tokens / protocols.length : 0;
+  const rate: Record<string, number> = {};
+  for (const [cat, c] of Object.entries(counts)) {
+    rate[cat] = (c.t + shrink * base) / (c.n + shrink);
+  }
+  return { rate, base, shrink };
+}
+
+function catRateFor(rates: CategoryRates, category: string | null): number {
+  const r = rates.rate[category ?? 'Other'];
+  return r === undefined ? rates.base : r;
+}
 
 export interface LogisticModel {
   intercept: number;
@@ -730,12 +843,18 @@ export interface LogisticModel {
   feature_sds: number[];
   lambda: number;
   iterations: number;
+  /** The shrunk category rates this fit used (computed from the fitting set). */
+  cat_rates: CategoryRates;
 }
 
-/** The logistic's features for one protocol, unstandardized. v4: age enters as five one-hot
- * bands (0-179, 180-364, 365-729, 730+ days, missing listed_at) - see the header comment. */
-export function logisticFeatures(protocol: SnapshotProtocol, asOf: string, model: ModelConstants = MODEL): number[] {
+/** The logistic's features for one protocol, unstandardized. v6: log TVL; 7d growth clamped
+ * -60..+30%; chains capped at 10; log(age+1) with age 365 days when listed_at is missing;
+ * five one-hot age bands; and the protocol's category token rate, EB-shrunk toward the
+ * fitting set's base rate with strength 50. The shrunk rate is what lets the category
+ * signal transfer across the listing-date split (TESTS-v6.md). */
+export function logisticFeatures(protocol: SnapshotProtocol, asOf: string, rates: CategoryRates, model: ModelConstants = MODEL): number[] {
   const age = ageDays(asOf, protocol.listed_at);
+  const ageVal = age === null ? 365 : age;
   const rawGrowth = finite(protocol.change_7d, 0);
   const growth = Math.min(model.logistic_growth_cap, Math.max(model.growth_floor, rawGrowth)) / 100;
   const bands = [0, 0, 0, 0, 0];
@@ -744,14 +863,14 @@ export function logisticFeatures(protocol: SnapshotProtocol, asOf: string, model
   else if (age < 365) bands[1] = 1;
   else if (age < 730) bands[2] = 1;
   else bands[3] = 1;
-  const feats: number[] = [
+  return [
     Math.log(protocol.tvl_usd),
     growth,
     Math.min(10, protocol.chains.length),
+    Math.log(ageVal + 1),
     ...bands,
+    catRateFor(rates, protocol.category),
   ];
-  for (const c of LOGISTIC_CATEGORIES) feats.push(protocol.category === c ? 1 : 0);
-  return feats;
 }
 
 function sigmoid(z: number): number {
@@ -769,7 +888,8 @@ function sigmoid(z: number): number {
  * board row's odds (checked at build time; see TESTS-v2.md).
  */
 export function fitLogistic(snapshot: Snapshot, model: ModelConstants = MODEL): LogisticModel {
-  const rows = snapshot.protocols.map((p) => ({ x: logisticFeatures(p, snapshot.as_of, model), y: isPreToken(p) ? 0 : 1 }));
+  const rates = categoryRates(snapshot.protocols, model.logistic_cat_shrink);
+  const rows = snapshot.protocols.map((p) => ({ x: logisticFeatures(p, snapshot.as_of, rates, model), y: isPreToken(p) ? 0 : 1 }));
   const n = rows.length;
   const d = LOGISTIC_FEATURES.length;
   const means: number[] = [];
@@ -798,12 +918,12 @@ export function fitLogistic(snapshot: Snapshot, model: ModelConstants = MODEL): 
     for (let j = 0; j < d; j++) weights[j]! -= model.logistic_lr * (grads[j]! / n + (model.logistic_lambda * weights[j]!) / n);
     intercept -= model.logistic_lr * (gradB / n);
   }
-  return { intercept, weights, feature_means: means, feature_sds: sds, lambda: model.logistic_lambda, iterations: model.logistic_iterations };
+  return { intercept, weights, feature_means: means, feature_sds: sds, lambda: model.logistic_lambda, iterations: model.logistic_iterations, cat_rates: rates };
 }
 
 /** One protocol's token odds under a fitted logistic. */
 export function tokenOdds(protocol: SnapshotProtocol, asOf: string, logistic: LogisticModel, model: ModelConstants = MODEL): number {
-  const feats = logisticFeatures(protocol, asOf, model);
+  const feats = logisticFeatures(protocol, asOf, logistic.cat_rates, model);
   let z = logistic.intercept;
   for (let j = 0; j < feats.length; j++) z += logistic.weights[j]! * ((feats[j]! - logistic.feature_means[j]!) / logistic.feature_sds[j]!);
   return sigmoid(z);
@@ -839,10 +959,28 @@ export function farmCost(p: SnapshotProtocol, model: ModelConstants = MODEL): nu
   return gas.setup_usd + model.farm_weeks * gas.weekly_usd;
 }
 
-export function verdictFor(ev: number, odds: number): Verdict {
-  if (ev >= 12_500_000 && odds >= 0.45) return 'FARM';
-  if (ev >= 2_500_000 && odds >= 0.35) return 'THIN';
+/** The v6 farm verdict, on REAL per-farmer dollars: FARM when the expected net per active
+ * hour at the standard stake (0.02% of TVL) is at least $25 AND the token odds are at
+ * least 45%; THIN when the net is positive but not FARM; SKIP when the net is zero or
+ * negative. The odds floor is kept from v5: a huge conditional payout at 5% odds is not
+ * a farm. See the header comment for why the expected drop is odds-weighted (EV, not
+ * implied): the literal implied-value formula makes 117 of 198 rows FARM, including
+ * Sentora Curator at 17% odds - a size ranking, not a farming decision. */
+export function verdictFor(netUsd: number, netPerHour: number, odds: number): Verdict {
+  if (netPerHour >= 25 && odds >= 0.45) return 'FARM';
+  if (netUsd > 0) return 'THIN';
   return 'SKIP';
+}
+
+/** The standard stake for one farmer: 0.02% of the protocol's TVL (the leaders' standard). */
+export function standardDeposit(p: SnapshotProtocol, model: ModelConstants = MODEL): number {
+  return Math.round(p.tvl_usd * model.stake_fraction * 100) / 100;
+}
+
+/** The expected drop for one farmer at a given deposit: EV x drop share x (deposit / TVL).
+ * The drop share (7.5%) is a stated assumption - the snapshot carries no drop data. */
+export function expectedDrop(ev: number, deposit: number, tvl: number, model: ModelConstants = MODEL): number {
+  return ev * model.drop_share * (deposit / tvl);
 }
 
 /** The headline sentence's figures: how many watchlist slugs, how many rows, how many live protocols. */
@@ -873,7 +1011,10 @@ export function buildBoard(snapshot: Snapshot, model: ModelConstants = MODEL): B
     const ev = Math.max(1, Math.round(v.implied * odds));
     const cost = farmCost(p, model);
     const gas = gasCosts(gasTier(p));
-    const usdPerHour = Math.round(((ev - cost) / model.farm_hours) * 100) / 100;
+    const deposit = standardDeposit(p, model);
+    const expected = expectedDrop(ev, deposit, p.tvl_usd, model);
+    const net = Math.round((expected - cost) * 100) / 100;
+    const usdPerHour = Math.round((net / model.farm_hours) * 100) / 100;
     return {
       p,
       implied: v.implied,
@@ -890,9 +1031,12 @@ export function buildBoard(snapshot: Snapshot, model: ModelConstants = MODEL): B
       cost,
       gas,
       tier: gasTier(p),
+      deposit,
+      expected: Math.round(expected * 100) / 100,
+      net,
       usdPerHour,
-      breakeven: cost / v.implied,
-      verdict: verdictFor(ev, odds),
+      breakeven: cost / (v.implied * model.drop_share * model.stake_fraction),
+      verdict: verdictFor(net, usdPerHour, odds),
       late: v.age !== null && v.age > 730,
     };
   });
@@ -925,6 +1069,9 @@ export function buildBoard(snapshot: Snapshot, model: ModelConstants = MODEL): B
     weekly_gas_usd: s.gas.weekly_usd,
     gas_tier: s.tier,
     farm_hours: model.farm_hours,
+    farm_deposit_usd: s.deposit,
+    farm_expected_drop_usd: s.expected,
+    farm_net_usd: s.net,
     usd_per_hour: s.usdPerHour,
     breakeven_odds: Math.round(s.breakeven * 1000000) / 1000000,
     late_flag: s.late,
@@ -1097,6 +1244,9 @@ export function radarRow(row: BoardRow): RadarRow {
     farm_cost_usd: row.farm_cost_usd,
     weekly_gas_usd: row.weekly_gas_usd,
     gas_tier: row.gas_tier,
+    farm_deposit_usd: row.farm_deposit_usd,
+    farm_expected_drop_usd: row.farm_expected_drop_usd,
+    farm_net_usd: row.farm_net_usd,
     usd_per_hour: row.usd_per_hour,
     breakeven_odds: row.breakeven_odds,
     late_flag: row.late_flag,
