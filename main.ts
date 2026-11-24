@@ -1,20 +1,24 @@
-// Token Radar v5 (radar-v5) for make.fun token-radar-01 (Node 22, standard library only).
+// Token Radar v6 (radar-v6) for make.fun token-radar-01 (Node 22, standard library only).
 //
 // The program reads the sealed snapshot from /input/snapshot.json (or --input <file|dir>), scores every
 // pre-token protocol with the model in lib/model.ts, writes the ranked board to /output/board.json, and
 // copies this repository's dashboard/ and screenshots/ to /output. Last, it writes /output/dossier.json,
 // the summary the judge reads, with the vendored make.fun library.
 //
-// The model (radar-v5): implied value from a log-log fit of market cap on TVL
+// The model (radar-v6): implied value from a log-log fit of market cap on TVL
 // (log(mcap) = 5.333 + 0.625*log(TVL) - 0.206*log(1+chains), 84 trimmed rule comps) times a shrunk
 // category factor, a small growth term and a maturity term; token odds from a logistic regression on all
-// 758 protocols, age as five one-hot bands (0-179, 180-364, 365-729, 730+ days, missing);
-// expected value = implied x odds. The board is ranked by implied value,
+// 758 protocols - v6 features: log TVL, log(age+1), age as five one-hot bands, 7d growth, chains, and
+// the category token rate EB-shrunk toward the base rate (strength 50), which is what lets the odds
+// walk-forward (WF Brier 0.233 vs test base rate 0.241 at the primary cutoff); expected value =
+// implied x odds. The board is ranked by implied value,
 // as the sealed gate requires (sorted_by_value); every row also carries its EV rank, and
 // the dashboard's default sort is EV. 40 watchlist protocols + 158 early ones = 198 rows,
-// each with a costed farm plan (FARM / THIN / SKIP). The walk-forward is a listing-date split
+// each with a costed farm plan (FARM / THIN / SKIP, on real per-farmer dollars: expected drop
+// = EV x 7.5% x (deposit / TVL) minus the fee, at a standard stake of 0.02% of TVL). The
+// walk-forward is a listing-date split
 // (train on protocols DefiLlama listed before a cutoff, test on those listed after it), NOT a
-// token-launch walk-forward: the snapshot carries no token-launch date. See TESTS-v5.md for the
+// token-launch walk-forward: the snapshot carries no token-launch date. See TESTS-v6.md for the
 // held-out numbers.
 //
 // The dashboard is a static page, no framework and no network: dashboard/index.html, dashboard/app.css
