@@ -137,6 +137,9 @@ tbody tr[data-selected="true"] { background: color-mix(in srgb, var(--accent) 8%
 .proof-title { color: var(--muted); font-size: 12px; }
 .proof-big { font-family: var(--font-num); font-size: 13px; font-weight: 600; }
 .evidence { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--step-2); margin-top: var(--step-3); }
+/* v7: Evidence 1 + scatter above the board, two columns; the scatter drops its top margin inside. */
+.evidence-top { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--step-2); margin-top: var(--step-3); }
+.evidence-top .scatter { margin-top: 0; }
 .ev { border: 1px solid var(--border); border-radius: var(--radius-panel); background: var(--surface); overflow: hidden; }
 .ev h3 { padding: var(--step-2) var(--step-3) 0; font-size: 13px; }
 .ev table { font-size: 11px; }
@@ -164,5 +167,5 @@ tbody tr[data-selected="true"] { background: color-mix(in srgb, var(--accent) 8%
 .econ-row input[type="range"] { width: 140px; }
 @media (max-width: 900px) {
   .proof-grid { grid-template-columns: 1fr; }
-  .evidence { grid-template-columns: 1fr; }
+  .evidence, .evidence-top { grid-template-columns: 1fr; }
 }

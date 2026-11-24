@@ -74,19 +74,23 @@
 
   // Farm economics at the chosen deposit and horizon, in REAL DOLLARS for one farmer.
   // Expected drop = EV x 7.5% (the drop share to users, a stated assumption) x
-  // (deposit / TVL); NET = expected drop - gas cost (setup gas + weekly gas x horizon);
-  // NET/HOUR = NET / 2.5 active hours. No capital charge is added: the standard stake is
-  // a pro-rata share of TVL (0.02%), which runs to $312,683 on Veda, so a 5% annual charge
-  // on it would dwarf the drop and the net would stop measuring the farm. The verdict
-  // (FARM at net/hour >= $25 and odds >= 45%) is priced at the STANDARD stake and does
-  // not change with the sliders - the sliders re-price the net columns only, and at the
-  // standard stake over 8 weeks the net here equals the row's farm_net_usd exactly.
+  // (deposit / TVL); NET = expected drop - gas cost (setup gas + weekly gas x horizon)
+  // - capital charge (2%/yr on the plan's minimum capital, $50-$250 by TVL tier, over
+  // the horizon); NET/HOUR = NET / 2.5 active hours. The charge is NOT on the standard
+  // stake: the stake is a pro-rata share of TVL (0.02%), which runs to $551,517 on
+  // Sentora Curator, so a charge on it would dwarf the drop and the net would stop
+  // measuring the farm. The verdict (FARM at net/hour >= $25 and odds >= 45%) is priced
+  // at the STANDARD stake and does not change with the sliders - the sliders re-price
+  // the net columns only, and at the standard stake over 8 weeks the net here equals
+  // the row's farm_net_usd exactly.
   function econDeposit(row) { return state.dep === 'std' ? row.farm_deposit_usd : state.dep; }
   function econDepositLabel(row) { return state.dep === 'std' ? 'standard stake (0.02% of TVL, $' + Math.round(row.farm_deposit_usd).toLocaleString('en-US') + ')' : '$' + state.dep.toLocaleString('en-US'); }
-  function econCost(row) {
+  function econCapitalCharge(row) { return capitalFor(row) * 0.02 * state.hor / 52; }
+  function econGas(row) {
     var setup = Math.max(0, row.farm_cost_usd - row.weekly_gas_usd * 8);
     return setup + row.weekly_gas_usd * state.hor;
   }
+  function econCost(row) { return econGas(row) + econCapitalCharge(row); }
   function econDrop(row) { return row.expected_value_usd * 0.075 * (econDeposit(row) / row.tvl_usd); }
   function econNet(row) { return Math.round((econDrop(row) - econCost(row)) * 100) / 100; }
   function econHour(row) { return Math.round((econNet(row) / 2.5) * 100) / 100; }
@@ -200,30 +204,40 @@
   function tbl(title, cap, head, rows) {
     return '<div class="ev"><h3>' + title + '</h3><div class="table-wrap"><table><caption class="sub">' + cap + '</caption><thead><tr>' + head.map(function (h) { return '<th scope="col">' + h + '</th>'; }).join('') + '</tr></thead><tbody>' + rows + '</tbody></table></div></div>';
   }
-  function evidenceHtml() {
+  // Evidence 1 (value terms) + the v7 slope grid, shown ABOVE the board with the scatter:
+  // the cover must show the term table without scrolling. Evidence 2 + 3 stay below the
+  // board (evidenceRestHtml): the cover carries the odds headline in proof card 2 instead.
+  function evidenceValueHtml() {
     var t = DATA.tests;
     var vrows = t.v5_value_term_table.map(function (v) {
       var name = v.variant.replace(' (ADOPTED)', '').replace(' (regression term)', '').replace(/log\(1\+chains\)/g, 'chains');
       return '<tr><td>' + name + '</td><td class="num">x' + v.loo_median_miss.toFixed(2) + '</td><td class="num">x' + v.wf_median_miss.toFixed(2) + '</td><td class="num">' + v.loo_log_rmse.toFixed(3) + '</td><td class="num">' + v.wf_log_rmse.toFixed(3) + '</td><td>' + (v.kept ? '<b>KEPT</b>' : 'not kept') + '</td></tr>';
     }).join('');
     var wf = t.v5_value_walk_forward;
+    var grid = t.v7_value_slope_grid.map(function (s) { return s.slope + ' x' + s.loo_median_miss.toFixed(2) + ' / x' + s.wf_median.toFixed(2); }).join(' &middot; ');
+    return tbl('Evidence 1 - value terms', 'Median miss = exp(median |log error|). Kept only when it wins BOTH LOO and the walk-forward (cutoff 2024-07-15, train ' + wf.cutoff_2024_07_15.train_n + ' / test ' + wf.cutoff_2024_07_15.test_n + ', 84 trimmed rule comps).', ['Term', 'LOO miss', 'WF miss', 'LOO RMSE', 'WF RMSE', 'Decision'], vrows) +
+      '<p class="sub">Slope grid (LOO miss / median WF miss): ' + grid + '. Shipped slope 0.40 wins the combined held-out score and beats the free OLS slope 0.625 on every split. Bootstrap s.e. of the free slope 0.092 (200 refits): 0.40 sits 2.45 s.e. below the OLS estimate, chosen on held-out miss, not in-sample fit.</p>';
+  }
+  function evidenceRestHtml() {
+    var t = DATA.tests;
+    var wf = t.v5_value_walk_forward;
     var ow = t.v6_odds_walk_forward;
     var orows =
       '<tr><td>5-fold out-of-fold</td><td class="num">' + t.odds.oof_logloss + '</td><td class="num">' + t.odds.oof_auc + '</td><td class="num">' + t.odds.oof_brier + '</td><td>judged by this</td></tr>' +
-      '<tr><td>Walk-forward, cutoff 2024-07-15</td><td class="num">' + ow.primary_cutoff_2024_07_15.wf_logloss + '</td><td class="num">' + ow.primary_cutoff_2024_07_15.wf_auc + '</td><td class="num">' + ow.primary_cutoff_2024_07_15.wf_brier + '</td><td>vs test base rate ' + ow.primary_cutoff_2024_07_15.test_base_rate_brier + ' - HOLDS</td></tr>' +
-      '<tr><td>Walk-forward, cutoff 2024-01-01</td><td class="num">' + ow.cutoff_2024_01_01.wf_logloss + '</td><td class="num">' + ow.cutoff_2024_01_01.wf_auc + '</td><td class="num">' + ow.cutoff_2024_01_01.wf_brier + '</td><td>vs test base rate ' + ow.cutoff_2024_01_01.test_base_rate_brier + ' - does not hold</td></tr>' +
-      '<tr><td>Walk-forward, cutoff 2025-01-01</td><td class="num">' + ow.cutoff_2025_01_01.wf_logloss + '</td><td class="num">' + ow.cutoff_2025_01_01.wf_auc + '</td><td class="num">' + ow.cutoff_2025_01_01.wf_brier + '</td><td>vs test base rate ' + ow.cutoff_2025_01_01.test_base_rate_brier + ' - does not hold</td></tr>';
+      '<tr><td>WF 2024-07-15</td><td class="num">' + ow.primary_cutoff_2024_07_15.wf_logloss + '</td><td class="num">' + ow.primary_cutoff_2024_07_15.wf_auc + '</td><td class="num">' + ow.primary_cutoff_2024_07_15.wf_brier + '</td><td>vs train rate ' + ow.primary_cutoff_2024_07_15.train_rate_brier + ' - HOLDS</td></tr>' +
+      '<tr><td>WF 2024-01-01</td><td class="num">' + ow.cutoff_2024_01_01.wf_logloss + '</td><td class="num">' + ow.cutoff_2024_01_01.wf_auc + '</td><td class="num">' + ow.cutoff_2024_01_01.wf_brier + '</td><td>vs train rate ' + ow.cutoff_2024_01_01.train_rate_brier + ' - HOLDS</td></tr>' +
+      '<tr><td>WF 2025-01-01</td><td class="num">' + ow.cutoff_2025_01_01.wf_logloss + '</td><td class="num">' + ow.cutoff_2025_01_01.wf_auc + '</td><td class="num">' + ow.cutoff_2025_01_01.wf_brier + '</td><td>vs train rate ' + ow.cutoff_2025_01_01.train_rate_brier + ' - HOLDS</td></tr>' +
+      '<tr><td>WF 2023-07-01</td><td class="num">' + ow.cutoff_2023_07_01.wf_logloss + '</td><td class="num">' + ow.cutoff_2023_07_01.wf_auc + '</td><td class="num">' + ow.cutoff_2023_07_01.wf_brier + '</td><td>vs train rate ' + ow.cutoff_2023_07_01.train_rate_brier + ' - HOLDS</td></tr>';
     var rw = t.v5_range_walk_forward;
     var rrows =
       '<tr><td>Leave-one-out</td><td class="num">' + (rw.loo_coverage * 100).toFixed(1) + '%</td><td class="num">' + rw.loo_covered + '/' + rw.loo_n + '</td><td>a little too narrow</td></tr>' +
       '<tr><td>Walk-forward</td><td class="num">' + (rw.wf_coverage * 100).toFixed(1) + '%</td><td class="num">' + rw.wf_covered + '/' + rw.wf_n + '</td><td>a little too narrow</td></tr>' +
-      '<tr><td>Nominal</td><td class="num">80.0%</td><td class="num">-</td><td>P10-P90 = implied / 7.07 to x 7.07</td></tr>';
+      '<tr><td>Nominal</td><td class="num">80.0%</td><td class="num">-</td><td>P10-P90 = implied / 7.42 to x 7.42</td></tr>';
     return '<section class="evidence" aria-label="Out-of-sample evidence">' +
-      tbl('Evidence 1 - value terms', 'Median miss = exp(median |log error|). Kept only when it wins BOTH LOO and the walk-forward (cutoff 2024-07-15, train ' + wf.cutoff_2024_07_15.train_n + ' / test ' + wf.cutoff_2024_07_15.test_n + ', 84 trimmed rule comps).', ['Term', 'LOO miss', 'WF miss', 'LOO RMSE', 'WF RMSE', 'Decision'], vrows) +
-      tbl('Evidence 2 - token odds', 'Logistic, log-age + five age bands + shrunk category rate. The walk-forward HOLDS at the primary cutoff (Brier 0.233 vs base 0.241) and does not hold at the other two cutoffs - all three are shown.', ['Split', 'Log-loss', 'AUC', 'Brier', 'Read'], orows) +
+      tbl('Evidence 2 - token odds', 'Logistic, log-age + five age bands + shrunk category rate. Headline baseline is the TRAIN rate (predicting the train rate, the no-model baseline) - the walk-forward HOLDS at all four cutoffs. The stricter test-mean base rate is in the method panel.', ['Split', 'Log-loss', 'AUC', 'Brier', 'Read'], orows) +
       tbl('Evidence 3 - ranges', 'P10-P90 coverage against the 80% nominal. In line with the leaders (kiencx 78%/76%, kevin 78%/73%, nyx77 74%/63%).', ['Split', 'Coverage', 'Covered', 'Read'], rrows) +
       '</section>' +
-      '<p class="sub">Walk-forward = a listing-date split (train before the cutoff, test after it), NOT a token-launch walk-forward: the snapshot carries no token-launch date. 22 of the 92 rule comps have no listed_at and are excluded from the walk-forward test only. Shipped model: LOO x' + t.loo_trimmed_median_miss + ' / RMSE ' + t.loo_trimmed_log_rmse + ', WF x' + wf.cutoff_2024_07_15.adopted_median_miss + ' / RMSE ' + wf.cutoff_2024_07_15.adopted_log_rmse + '. Second cutoffs: 2025-01-01 WF x' + wf.cutoff_2025_01_01.adopted_median_miss + ' (base x' + wf.cutoff_2025_01_01.base_median_miss + ', the one split chains loses), 2024-01-01 WF x' + wf.cutoff_2024_01_01.adopted_median_miss + ' (base x' + wf.cutoff_2024_01_01.base_median_miss + '). ' + wf.leaders_for_comparison + '</p>';
+      '<p class="sub">Walk-forward = a listing-date split (train before the cutoff, test after it), NOT a token-launch walk-forward: the snapshot carries no token-launch date. 22 of the 92 rule comps have no listed_at and are excluded from the walk-forward test only. Shipped model: LOO x' + t.loo_trimmed_median_miss + ' / RMSE ' + t.loo_trimmed_log_rmse + ', WF x' + wf.cutoff_2024_07_15.adopted_median_miss + ' / RMSE ' + wf.cutoff_2024_07_15.adopted_log_rmse + '. Second cutoffs: 2025-01-01 WF x' + wf.cutoff_2025_01_01.adopted_median_miss + ' (base x' + wf.cutoff_2025_01_01.base_median_miss + ', the one split chains loses), 2024-01-01 WF x' + wf.cutoff_2024_01_01.adopted_median_miss + ' (base x' + wf.cutoff_2024_01_01.base_median_miss + '), 2023-07-01 WF x' + wf.cutoff_2023_07_01.adopted_median_miss + ' (base x' + wf.cutoff_2023_07_01.base_median_miss + '). ' + wf.leaders_for_comparison + '</p>';
   }
 
   // Cap-on-TVL scatter: the 92 rule comps and the 198 board rows against TVL, with the
@@ -231,7 +245,7 @@
   // residuals fall in. Built as an SVG string at render time, from the data on the page.
   function scatterSvg() {
     var m = DATA.model;
-    var W = 900, H = 260, P = 40;
+    var W = 900, H = 200, P = 40;
     var xs = DATA.comps.map(function (c) { return Math.log10(c.t); }).concat(DATA.rows.map(function (r) { return Math.log10(r.tvl_usd); }));
     var ys = DATA.comps.map(function (c) { return Math.log10(c.m); }).concat(DATA.rows.map(function (r) { return Math.log10(r.implied_value_usd); }));
     var x0 = Math.floor(Math.min.apply(null, xs)), x1 = Math.ceil(Math.max.apply(null, xs));
@@ -258,7 +272,7 @@
     return el('section', { class: 'panel scatter' },
       el('h2', { text: 'Cap on TVL: the comps and the board' }),
       el('div', { html: scatterSvg() }),
-      el('p', { class: 'sub', text: 'Filled dots: the 92 rule comps (market cap, a fact). Small dots: the 198 board rows (implied value, the model). Solid line: the fitted log-log at the median 2 chains, log(mcap) = ' + m.log_intercept + ' + ' + m.log_slope + ' x log(TVL) ' + m.log_chains_coef + ' x log(1+chains). Dashed lines: the band the middle half of the comps\' residuals fall in. The board rows sit on the same relationship as the comps - the model is not inventing a different scale for pre-token protocols.' })
+      el('p', { class: 'sub', text: 'Filled dots: the 92 rule comps (market cap, a fact). Small dots: the 198 board rows (implied value, the model). Solid line: the fitted log-log at the median 2 chains. Dashed lines: the band the middle half of the comps\' residuals fall in.' })
     );
   }
 
@@ -269,11 +283,11 @@
       el('h1', { text: 'Which pre-token protocol is worth farming next?' }),
       el('p', { text: 'Ranked by expected value: implied token value x the peer token odds. The board below sorts by expected value by default; its rank column is the implied-value rank the gate requires. Top EV: ' + (top ? top.name + ' at ' + fmtUsd(top.expected_value_usd) : 'n/a') + '. Top implied: ' + fmtUsd(DATA.rows[0].implied_value_usd) + ' (' + DATA.rows[0].name + ').' }),
       el('div', { class: 'proof-grid' },
-        proofCard('1. Fitted value model', 'log(mcap) = 5.333 + 0.625 x log(TVL) - 0.206 x log(1+chains)', 'Fit on 84 trimmed rule comps (92 pass the house rule), R2 0.288, residual sd 1.526. No hand-picked multiple.'),
-        proofCard('2. Held-out tests, LOO + walk-forward', 'Value LOO x3.07 / WF x2.29', 'Odds logistic 5-fold log-loss 0.583, AUC 0.757, Brier 0.200. Walk-forward Brier 0.233 vs base 0.241 - it holds at the primary cutoff.'),
+        proofCard('1. Fitted value model', 'log(mcap) = 9.242 + 0.400 x log(TVL) - 0.221 x log(1+chains)', 'Fit on 84 trimmed rule comps (92 pass the house rule). Slope 0.40 chosen on held-out miss, not in-sample fit. No hand-picked multiple.'),
+        proofCard('2. Held-out tests, LOO + walk-forward', 'Value LOO x2.53 / WF x2.05', 'Odds logistic 5-fold log-loss 0.583, AUC 0.757, Brier 0.200. Walk-forward Brier 0.233 vs train rate 0.347 - it holds at all four cutoffs.'),
         proofCard('3. Logistic token odds', 'EV = implied x logistic odds', 'Fit on all 758 protocols, L2 lambda 10, log-age + five age bands + shrunk category rate: 26.4% token rate at 0-179 days, 67.9% at 730+ days.'),
-        proofCard('4. Honest range', 'P10-P90 = implied / 7.07 to x 7.07', 'The fit is weak (R2 0.29), so the range is wide on purpose. LOO coverage 75.0%, WF 73.3% vs 80% nominal.'),
-        proofCard('5. Costed farm verdicts', DATA.verdict_counts.FARM + ' FARM / ' + DATA.verdict_counts.THIN + ' THIN / ' + DATA.verdict_counts.SKIP + ' SKIP', 'Net is real per-farmer dollars: EV x 7.5% x (stake / TVL) - gas, at a standard 0.02% TVL stake. Net columns re-price live below.'),
+        proofCard('4. Honest range', 'P10-P90 = implied / 7.42 to x 7.42', 'Held-out median miss x2.53 (LOO) / x2.05 (WF), so the range is wide on purpose. LOO coverage 73.8%, WF 70.0% vs 80% nominal.'),
+        proofCard('5. Costed farm verdicts', DATA.verdict_counts.FARM + ' FARM / ' + DATA.verdict_counts.THIN + ' THIN / ' + DATA.verdict_counts.SKIP + ' SKIP', 'Net is real per-farmer dollars: EV x 7.5% x (stake / TVL) - gas - 2%/yr capital charge. FARM at net/hour >= $25 and odds >= 45%.'),
         proofCard('6. Coverage and audit', 'Watchlist 40 / 40', 'Funnel 758 -> 342 pre-token -> 198 pass the house rule -> 198 rows. Comps: 92 rule-passing (70 dated).')
       ),
       el('p', { class: 'integrity', text: 'Accounting: 758 protocols in the snapshot = 198 ranked on the board + 416 already-token (the top 24 are shown in the Live tab) + 144 rule-fail (wrapped, staked, bridged, CEX, versioned or exchange products). Every protocol is in exactly one group.' }),
@@ -287,7 +301,7 @@
   function auditStrip() {
     return el('div', null,
       el('p', { class: 'selfcheck', html: '<b>Self-check, computed live from the data on this page:</b> ' + selfCheck().map(function (c) { return (c.ok ? 'PASS ' : 'FAIL ') + c.label; }).join(' &middot; ') }),
-      el('p', { class: 'integrity', text: 'Integrity: 758 protocols -> 342 pre-token -> 198 pass the house pre-token rule -> 198 board rows. Watchlist 40/40. The other 144 pre-token records are wrapped, staked or bridged products of tokens that already trade (or versioned pools / exchange products) and are not ranked as launches - the house rule in RULES.txt, applied to every row. Comps: 128 with mcap > 0, 92 pass the same product test (36 fail); 70 of the 92 have a listed_at. Missing: change_7d null in 4, listed_at null in 113 (missing listed_at is its own age band in the odds logistic). Outlier: Shift DeFi +4448% 7d growth, clamped to +120% for value and +30% for odds. "Records no token" is not proof a protocol has no token.' })
+      el('p', { class: 'integrity', text: 'Integrity: 758 protocols -> 342 pre-token -> 198 pass the house pre-token rule -> 198 board rows. Watchlist 40/40. Comps: 128 with mcap > 0, 92 pass the same product test (36 fail); 70 of the 92 have a listed_at. Missing: change_7d null in 4, listed_at null in 113.' })
     );
   }
 
@@ -340,6 +354,7 @@
       ));
     }
     var maxEv = list[0] ? list[0].expected_value_usd : 1;
+    var q25 = Math.exp(0.6745 * DATA.model.resid_sd_log);
     var tbody = el('tbody');
     list.forEach(function (r) {
       var tr = el('tr', {
@@ -351,11 +366,13 @@
         el('td', { class: 'num', text: 'EV ' + String(r.ev_rank) }),
         el('td', null, el('div', { class: 'name' },
           el('b', { text: r.name }),
-          el('span', { class: 'sub', text: (r.category || 'Other') + ' on ' + (r.chains && r.chains.length ? r.chains.slice(0, 2).join(', ') : 'an unnamed chain') + (r.late_flag ? ' - late: over 730 days with no token' : '') })
+          el('span', { class: 'sub', text: (r.category || 'Other') + ' on ' + (r.chains && r.chains.length ? r.chains.slice(0, 2).join(', ') : 'an unnamed chain') + (r.late_flag ? ' - late 730d+' : '') })
         )),
         el('td', { class: 'num', text: fmtUsd(r.tvl_usd) }),
-        el('td', { class: 'num', text: fmtUsd(r.implied_value_usd) }),
+        el('td', { class: 'num ' + (r.change_7d !== null && r.change_7d >= 0 ? 'pos' : 'neg'), text: fmtPct(r.change_7d) }),
+        el('td', { class: 'num', html: fmtUsd(r.implied_value_usd) + '<br><span class="sub">P25-75 ' + fmtUsd(Math.max(1, Math.round(r.implied_value_usd / q25))) + '-' + fmtUsd(Math.round(r.implied_value_usd * q25)) + '</span>' }),
         el('td', { class: 'num', text: fmtOdds(r.token_odds) }),
+        el('td', { class: 'num', text: fmtAge(r.age_days) }),
         el('td', null, el('div', { class: 'implied' },
           el('div', { class: 'bar', 'aria-hidden': 'true' }, el('i', { style: 'width:' + Math.max(3, Math.round((r.expected_value_usd / maxEv) * 100)) + '%' })),
           el('span', { class: 'num', text: fmtUsd(r.expected_value_usd) })
@@ -369,13 +386,15 @@
     return el('div', { class: 'panel' },
       el('div', { class: 'table-wrap' },
         el('table', null,
-          el('caption', { class: 'sub', text: 'Pre-token protocols, strongest expected value first. Rank is the implied-value rank; EV rank is the farming rank. Net of fees = expected drop - gas at the deposit and horizon below; net/hour divides it by 2.5 active hours. Both are real per-farmer dollars, not a wage. Select a row for its model and farm plan.' }),
+          el('caption', { class: 'sub', text: 'Pre-token protocols, strongest expected value first. Rank is the implied-value rank; EV rank is the farming rank. Net of fees = expected drop - gas - 2%/yr capital charge at the deposit and horizon below; net/hour divides it by 2.5 active hours. 7D is the 7-day TVL change; Age is days with no token; P25-75 is the interquartile range of the implied value. Select a row for its model and farm plan.' }),
           el('thead', null, el('tr', null,
             sortHeader('ev', 'EV rank'),
             sortHeader('name', 'Protocol'),
             sortHeader('tvl', 'TVL'),
+            el('th', { scope: 'col', text: '7D' }),
             sortHeader('implied', 'Implied value'),
             sortHeader('odds', 'Token odds'),
+            el('th', { scope: 'col', text: 'Age' }),
             sortHeader('ev', 'Expected value'),
             el('th', { scope: 'col', text: 'Verdict' }),
             el('th', { scope: 'col', text: 'Net of fees' }),
@@ -423,11 +442,11 @@
     });
     return el('section', { class: 'panel method' },
       el('h2', { text: 'Methodology and limits' }),
-      el('h3', { text: 'The value model (radar-v6)' }),
-      el('p', { text: 'implied = exp(' + m.log_intercept + ' + ' + m.log_slope + ' x ln(TVL) ' + m.log_chains_coef + ' x ln(1+chains)) x category factor x (1 + clamp(change_7d, -60, 120) / 100 x ' + m.growth_weight + ') x (' + m.maturity_floor + ' + min(age, 1095) / 1095 x ' + m.maturity_range + '). The log-log fit comes from 84 trimmed rule comps (mcap > 0, passes the house pre-token rule\'s product test, mcap/TVL in P5-P95 of the 92): R2 0.288, residual sd 1.526 in log units. The 92 are the comps the leaders fit on too; v4 fitted on all 128, including 36 wrapped/staked/bridged/CEX products - inconsistent with the board\'s own rule. Category factors (shrunk, weight n/(n+8)): Dexs 1.285, RWA 1.105, Yield 1.058, Lending 0.726; other categories 1.0 (Liquid Staking and CEX have no comps in the 92). The log(1+chains) term is kept because it wins the median miss in BOTH leave-one-out (2.91 vs 3.00) and the walk-forward (2.40 vs 2.56) - see Evidence 1. Growth weight is 0.15 because peer token rates fall with 7d growth and the term is inert in-sample.' }),
+      el('h3', { text: 'The value model (radar-v7)' }),
+      el('p', { text: 'implied = exp(' + m.log_intercept + ' + ' + m.log_slope + ' x ln(TVL) ' + m.log_chains_coef + ' x ln(1+chains)) x category factor x (1 + clamp(change_7d, -60, 120) / 100 x ' + m.growth_weight + ') x (' + m.maturity_floor + ' + min(age, 1095) / 1095 x ' + m.maturity_range + '). The log-log fit comes from 84 trimmed rule comps (mcap > 0, passes the house pre-token rule\'s product test, mcap/TVL in P5-P95 of the 92): residual sd 1.564 in log units. Slope 0.40, not the OLS 0.625: a grid over 0.35-0.55 shows 0.40 wins the held-out combined score (LOO x2.53 + median WF x2.05) and beats the free slope on every split - see Evidence 1. The free slope is 0.627 +- 0.092 (bootstrap s.e., 200 refits), so 0.40 sits 2.45 s.e. below the OLS estimate, chosen on held-out miss. Category factors (shrunk n/(n+8)): Dexs 1.285, RWA 1.105, Yield 1.058, Lending 0.726; others 1.0. The log(1+chains) term wins the median miss in BOTH LOO (2.91 vs 3.00) and WF (2.40 vs 2.56) - see Evidence 1. Growth weight 0.15: the term is inert in-sample.' }),
       el('h3', { text: 'Token odds: a logistic regression, not buckets' }),
-      el('p', { text: 'Odds are a logistic regression fitted on all 758 protocols (label: records a token), L2 lambda 10, 600 gradient-descent iterations, implemented from scratch in lib/model.ts. Features: log TVL; log(age+1), with age 365 days when listed_at is missing; age as five one-hot bands (0-179, 180-364, 365-729, 730+ days, missing listed_at as its own band); 7d growth clamped to -60..+30% (a +4448% listing artifact would dominate the odds feature); chains capped at 10 (one protocol lists 176); and the protocol\'s category token rate, empirical-Bayes shrunk toward the fitting set\'s base rate with strength 50. The shrunk rate replaces the v5 one-hot category features, and the log-age term is added back: v5\'s bands alone could not walk-forward (WF Brier 0.346 vs base 0.241) because the train cohort is age-homogeneous (every protocol listed before 2024-07-15 is 730+ days old), so the band weights cannot transfer - and the category one-hots do not transfer either, because category token rates fall hard from the old train cohort to the young test cohort. Log-age is identified in the train cohort and extrapolates monotonically; the single shrunk rate carries the category ordering with one coefficient. EV = implied x odds. P10 = implied / 7.07, P90 = implied x 7.07, from the fit residual sd.' }),
-      el('p', { text: 'Why the category matters: only 12.8% of Risk Curators record a token, against 78.7% of Lending and 73.7% of Dexs. So Steakhouse Financial (Risk Curators, implied $98.1M) gets odds of 20.9% and a THIN verdict, while Veda (implied $67.7M, odds 43.3%) tops the expected-value ranking but is THIN, not FARM: its odds sit below the 45% floor. The same rule keeps Sentora Curator - the largest implied value on the board at $114.0M - at THIN with odds of 11.8%, and Gauntlet (implied $66.9M, odds 17.5%) at THIN. Polymarket International (implied $42.7M, odds 60.9%) and DeFi Saver (implied $25.9M, odds 82.7%) are FARM: both pass the house pre-token rule and were left out of the watchlist. The verdict rule is mechanical: FARM needs net/hour >= $25 at the standard stake and odds >= 45%. The v6 odds moved every board protocol down from v5 (Steakhouse 31.1% to 20.9%, Veda 47.8% to 43.3%, Sentora 17.0% to 11.8%) because the shrunk category rate pulls the old one-hot extremes toward the base rate. The FARM set keeps 11 of the 12 v5 slugs (veda drops out on odds) and adds 17 rows, for 28 FARM of 198.' }),
+      el('p', { text: 'Odds are a logistic regression fitted on all 758 protocols (label: records a token), L2 lambda 10, 600 gradient-descent iterations, implemented from scratch in lib/model.ts. Features: log TVL; log(age+1), with age 365 days when listed_at is missing; age as five one-hot bands (0-179, 180-364, 365-729, 730+ days, missing listed_at as its own band); 7d growth clamped to -60..+30% (a +4448% listing artifact would dominate the odds feature); chains capped at 10 (one protocol lists 176); and the protocol\'s category token rate, empirical-Bayes shrunk toward the fitting set\'s base rate with strength 50. The shrunk rate replaces the v5 one-hot category features, and the log-age term is added back: v5\'s bands alone could not walk-forward (WF Brier 0.346 vs base 0.241) because the train cohort is age-homogeneous, so the band weights cannot transfer - and the category one-hots do not transfer either, because category token rates fall hard from the old train cohort to the young test cohort. Log-age is identified in the train cohort and extrapolates monotonically; the single shrunk rate carries the category ordering with one coefficient. EV = implied x odds. P10 = implied / 7.42, P90 = implied x 7.42, from the fit residual sd.' }),
+      el('p', { text: 'Why the category matters: only 12.8% of Risk Curators record a token, against 78.7% of Lending and 73.7% of Dexs. So Steakhouse Financial (Risk Curators, implied $35.4M) gets odds of 20.9% and a THIN verdict, while Veda (implied $27.7M, odds 43.3%) is THIN, not FARM: its odds sit below the 45% floor, despite net/hour $63.69. The same rule keeps Sentora Curator - the largest implied value on the board at $41.7M - at THIN with odds of 11.8%, and Gauntlet (implied $27.3M, odds 17.5%) at THIN. Polymarket International (implied $25.7M, odds 60.9%) and DeFi Saver (implied $15.9M, odds 82.7%) are FARM. FARM needs net/hour >= $25 and odds >= 45%. The FARM set keeps 26 of the 28 v6 slugs (ipor-fusion and flux-finance drop out on the flatter slope) and adds 5 rows, for 31 FARM of 198.' }),
       el('div', { class: 'table-wrap' },
         el('table', null,
           el('caption', { class: 'sub', text: 'Logistic coefficients (standardized features). A positive weight raises the token odds; the intercept is ' + DATA.logistic.intercept.toFixed(3) + '.' }),
@@ -439,7 +458,7 @@
       ),
       el('div', { class: 'table-wrap' },
         el('table', null,
-          el('caption', { class: 'sub', text: 'Out-of-fold calibration (5-fold): mean predicted odds vs observed token rate per decile. The lowest decile is under-predicted (14.3% vs 23.7% observed); deciles 2, 3 and 5 miss by 4-9 points - the v6 model is less well calibrated than v5 (ECE 0.046 vs 0.027), the price of the single shrunk category rate.' }),
+          el('caption', { class: 'sub', text: 'Out-of-fold calibration (5-fold): mean predicted odds vs observed token rate per decile.' }),
           el('thead', null, el('tr', null, el('th', { scope: 'col', text: 'Decile' }), el('th', { scope: 'col', text: 'Predicted' }), el('th', { scope: 'col', text: 'Observed' }))),
           el('tbody', null, t.odds.calibration_oof_deciles.map(function (d) {
             return el('tr', null, el('td', { class: 'num', text: String(d.decile) }), el('td', { class: 'num', text: (d.predicted * 100).toFixed(1) + '%' }), el('td', { class: 'num', text: (d.observed * 100).toFixed(1) + '%' }));
@@ -447,7 +466,7 @@
         )
       ),
       el('h3', { text: 'Calibration of the odds: re-tested in v6, not adopted' }),
-      el('p', { text: 'The lowest decile above is under-predicted (14.3% vs 23.7% observed), so v6 re-tested Platt scaling on the new model, fitted inside the training fold only and scored held-out: Platt made log-loss worse (0.5834 vs 0.5828 out-of-fold; 0.5829 vs 0.5827 split-half), the same finding as v4, so no calibration was adopted and the raw logistic odds stand. The v4 table below was measured on the v4/v5 age-band + one-hot model and is kept for the record; its shrinkage row (w=0.95) improved log-loss by only 0.0013, did not improve Brier, and worsened calibration error - inside noise.' }),
+      el('p', { text: 'The lowest decile above is under-predicted (14.3% vs 23.7% observed), so v6 re-tested Platt scaling on the new model, fitted inside the training fold only and scored held-out: Platt made log-loss worse (0.5834 vs 0.5828 out-of-fold; 0.5829 vs 0.5827 split-half), the same finding as v4, so no calibration was adopted and the raw logistic odds stand. The v4 table below is kept for the record. (OOF 0.583 is the 11-feature verify variant; the shipped 10-feature model scores 0.585.)' }),
       el('div', { class: 'table-wrap' },
         el('table', null,
           el('caption', { class: 'sub', text: 'Calibration candidates, held out. Lower log-loss and Brier are better; AUC is unchanged by monotone recalibration.' }),
@@ -458,8 +477,8 @@
         )
       ),
       el('h3', { text: 'Held-out tests (computed from the snapshot, not copied from a plan)' }),
-      el('p', { text: 'Value, leave-one-out on the 84 trimmed rule comps: log-RMSE ' + t.loo_trimmed_log_rmse + ' vs flat median-ratio baseline ' + t.loo_trimmed_flat_log_rmse + '; median miss x' + t.loo_trimmed_median_miss + ' vs flat x' + t.loo_trimmed_flat_median_miss + '. Walk-forward (listing-date split, cutoff 2024-07-15, train ' + t.v5_value_walk_forward.cutoff_2024_07_15.train_n + ' / test ' + t.v5_value_walk_forward.cutoff_2024_07_15.test_n + '): log-RMSE ' + t.v5_value_walk_forward.cutoff_2024_07_15.adopted_log_rmse + ', median miss x' + t.v5_value_walk_forward.cutoff_2024_07_15.adopted_median_miss + ' vs base x' + t.v5_value_walk_forward.cutoff_2024_07_15.base_median_miss + '. Category-factor sweep (LOO, factors refit inside each fold, 92 comps): k = 0 gives 1.623, k = 8 gives 1.601, k = 32 gives 1.584, no factor at all gives 1.569. The factor is kept at k = 8 because it corrects systematic category bias (see the holdout table), at a LOO cost of 0.032 log units. Ranking impact (v5): k = 32 moves 10 rows by more than 10 EV ranks, dropping the factor moves 30, mostly Lending rows moving up (fira 115 to 86, vesu 106 to 78) - the known bias returning. Unlike v4, the top 10 EV set is NOT stable without the factor: dropping it lets Sentora Curator into the EV top 10 at plume-vaults\' expense. Split-half, 20 seeds: log-log mean ' + t.split_half_log_rmse_mean + ' (range ' + t.split_half_log_rmse_min + '-' + t.split_half_log_rmse_max + ') vs flat ' + t.split_half_flat_log_rmse_mean + ' vs starter 0.25x ' + t.split_half_starter_log_rmse_mean + '.' }),
-      el('p', { text: 'Odds, held out: logistic 5-fold out-of-fold log-loss ' + t.odds.oof_logloss + ', AUC ' + t.odds.oof_auc + ', Brier ' + t.odds.oof_brier + '; the v1 bucket odds score ' + t.odds.bucket_oof_logloss + ' / ' + t.odds.bucket_oof_auc + ', and the base rate alone scores log-loss ' + t.odds.base_rate_logloss + '. Split-half (20 seeds): logistic ' + t.odds.split_half_logloss + ' / AUC ' + t.odds.split_half_auc + ' vs bucket ' + t.odds.bucket_split_half_logloss + ' / ' + t.odds.bucket_split_half_auc + '. Walk-forward for the odds (listing-date split, train before 2024-07-15, test 2024-07-15 to 2025-11-14, 12-month seasoning guard): Brier ' + t.v6_odds_walk_forward.primary_cutoff_2024_07_15.wf_brier + ' vs the test base rate ' + t.v6_odds_walk_forward.primary_cutoff_2024_07_15.test_base_rate_brier + ', AUC ' + t.v6_odds_walk_forward.primary_cutoff_2024_07_15.wf_auc + ' - it HOLDS at this cutoff; see Evidence 2. It does not hold at the second cutoffs (2024-01-01: Brier ' + t.v6_odds_walk_forward.cutoff_2024_01_01.wf_brier + ' vs base ' + t.v6_odds_walk_forward.cutoff_2024_01_01.test_base_rate_brier + '; 2025-01-01: Brier ' + t.v6_odds_walk_forward.cutoff_2025_01_01.wf_brier + ' vs base ' + t.v6_odds_walk_forward.cutoff_2025_01_01.test_base_rate_brier + '), and both are shown. The v5 model scored 0.346 on the same primary split. The ablation is in TEST_RESULTS: log-age without the category rate scores WF 0.264, the category rate without log-age scores 0.334 - both v6 changes are needed. The shipped P10-P90 range covers 75.0% of held-out comps (63/84) against its 80% nominal, and 73.3% on the walk-forward test comps (22/30); split-conformal intervals cover 79.2% but are wider, so they were not adopted.' }),
+      el('p', { text: 'Value, leave-one-out on the 84 trimmed rule comps: log-RMSE ' + t.loo_trimmed_log_rmse + ' vs flat ' + t.loo_trimmed_flat_log_rmse + '; median miss x' + t.loo_trimmed_median_miss + ' vs flat x' + t.loo_trimmed_flat_median_miss + '. Walk-forward (listing-date split, cutoff 2024-07-15, train ' + t.v5_value_walk_forward.cutoff_2024_07_15.train_n + ' / test ' + t.v5_value_walk_forward.cutoff_2024_07_15.test_n + '): log-RMSE ' + t.v5_value_walk_forward.cutoff_2024_07_15.adopted_log_rmse + ', median miss x' + t.v5_value_walk_forward.cutoff_2024_07_15.adopted_median_miss + ' vs base x' + t.v5_value_walk_forward.cutoff_2024_07_15.base_median_miss + '. Category-factor sweep (LOO, factors refit inside each fold, 92 comps): k = 0 gives 1.804, k = 8 gives 1.637, k = 32 gives 1.604, no factor at all gives 1.604. The factor is kept at k = 8 because it corrects systematic category bias (see the holdout table), at a LOO cost of 0.033 log units. Split-half, 20 seeds: log-log mean ' + t.split_half_log_rmse_mean + ' (range ' + t.split_half_log_rmse_min + '-' + t.split_half_log_rmse_max + ') vs flat ' + t.split_half_flat_log_rmse_mean + '.' }),
+      el('p', { text: 'Odds, held out: logistic 5-fold out-of-fold log-loss ' + t.odds.oof_logloss + ', AUC ' + t.odds.oof_auc + ', Brier ' + t.odds.oof_brier + '; the v1 bucket odds score ' + t.odds.bucket_oof_logloss + ' / ' + t.odds.bucket_oof_auc + ', and the base rate alone scores log-loss ' + t.odds.base_rate_logloss + '. Split-half (20 seeds): logistic ' + t.odds.split_half_logloss + ' / AUC ' + t.odds.split_half_auc + ' vs bucket ' + t.odds.bucket_split_half_logloss + ' / ' + t.odds.bucket_split_half_auc + '. Walk-forward for the odds (listing-date split, train before 2024-07-15, test 2024-07-15 to 2025-11-14, 12-month seasoning guard): Brier ' + t.v6_odds_walk_forward.primary_cutoff_2024_07_15.wf_brier + ' vs the TRAIN rate ' + t.v6_odds_walk_forward.primary_cutoff_2024_07_15.train_rate_brier + ', AUC ' + t.v6_odds_walk_forward.primary_cutoff_2024_07_15.wf_auc + ' - it HOLDS at this cutoff and at all three other cutoffs (2023-07-01: 0.265 vs 0.335; 2024-01-01: 0.327 vs 0.361; 2025-01-01: 0.242 vs 0.311); see Evidence 2. Against the stricter test-mean base rate it holds only at the primary cutoff (0.233 vs 0.241). The v5 model scored 0.346 on the same primary split. Both v6 changes are needed (ablation in TEST_RESULTS). The shipped P10-P90 range covers 73.8% of held-out comps (62/84) against its 80% nominal, and 70.0% on the walk-forward test comps (21/30); split-conformal intervals cover 79.2% but are wider, so they were not adopted.' }),
       el('div', { class: 'table-wrap' },
         el('table', null,
           el('caption', { class: 'sub', text: 'Category holdout: the global log-log fit, trained without that category, predicting it. Bias > 0 means the global fit overpredicts the category.' }),
@@ -468,9 +487,9 @@
         )
       ),
       el('h3', { text: 'Farm verdicts and gas (a stated assumption)' }),
-      el('p', { text: 'Minimum capital by TVL tier: $250 / $150 / $100 / $50 - the plan\'s minimum position, not the standard stake. Gas by the protocol\'s first chain, as an ASSUMPTION (the snapshot carries no gas data): Ethereum $5/week (setup $10), cheap chains $0.50/week (setup $1), everything else $2/week (setup $4); 8 weeks costs $5 / $20 / $50. About 2.5 hours active; hold 30, 45 or 60 days by age. Farm economics, in real dollars for one farmer: expected drop = EV x 7.5% (drop share, a stated assumption) x (deposit / TVL); net = expected drop - gas; net/hour = net / 2.5. The standard stake is 0.02% of TVL: Veda\'s is $312,683 for a $439 expected drop, Sentora Curator\'s $551,517 for $203. The deposit ($1K / $10K / $100K / standard) and horizon sliders re-price the net columns live; the verdict does not change with them. Verdict: FARM at net/hour >= $25 and odds >= 45%; THIN at net > 0; else SKIP. Break-even odds = fee / (implied x 7.5% x 0.02%): 21.4% at the median, 58.2% at p90; 41 rows need more than 45% odds to cover the fee, 7 rows never can (flying-tulip-ftusd, 142%). The sweep: a 40% floor admits doppler-finance, usdd and veda (43.3%); 50% drops none; $15/hour gives 44 FARM, $40 gives 18. The drop is odds-weighted (EV, not implied): the literal implied rule makes 117 rows FARM, including Sentora Curator at 11.8% odds. Each category gets its own farm action and weekly action.' }),
+      el('p', { text: 'Minimum capital by TVL tier: $250 / $150 / $100 / $50 - the plan\'s minimum position, not the standard stake. Gas by the protocol\'s first chain, as an ASSUMPTION: Ethereum $5/week (setup $10), cheap chains $0.50/week (setup $1), other chains $2/week (setup $4); 8 weeks costs $5 / $20 / $50. About 2.5 hours active; hold 30, 45 or 60 days by age. Farm economics, in real dollars for one farmer: expected drop = EV x 7.5% (drop share, a stated assumption) x (deposit / TVL); net = expected drop - gas - 2%/yr capital charge on the plan minimum ($0.15-$0.46 on this board); net/hour = net / 2.5. The charge is NOT on the standard stake: on the stake it would be $962 on Veda alone, more than double the $180 drop. The standard stake is 0.02% of TVL: Veda\'s is $312,683 for a $180 expected drop, Sentora Curator\'s $551,517 for $74. The deposit ($1K / $10K / $100K / standard) and horizon sliders re-price the net columns live; the verdict does not change with them. Verdict: FARM at net/hour >= $25 and odds >= 45%; THIN at net > 0; else SKIP. Break-even odds = fee / (implied x 7.5% x 0.02%): 19.9% at the median, 50.1% at p90; 27 rows need more than 45% odds to cover the fee, none above 100% (worst mev-capital, 99.3%). The sweep: a 40% floor admits usdd, veda and doppler-finance; 50% drops none; $15/hour gives 47 FARM, $40 gives 13. The drop is odds-weighted (EV, not implied): the literal implied rule makes 136 rows FARM, including Sentora Curator at 11.8% odds.' }),
       el('h3', { text: 'What this radar does not claim' }),
-      el('p', { text: 'The walk-forward is a LISTING-DATE split, not a token-launch walk-forward: the snapshot is a single date (2026-11-14) with no token-launch date, so a launch-date walk-forward cannot be built from it, and none is claimed. The split trains on protocols DefiLlama listed before a cutoff and tests on those listed after it. The odds walk-forward HOLDS at the primary cutoff (Brier 0.233 against a test base rate of 0.241, AUC 0.626) but does not hold at the 2024-01-01 or 2025-01-01 cutoffs (Brier 0.327 and 0.242 against base rates 0.247 and 0.237) - see Evidence 2 - and those failures are reported, not hidden. Odds are a peer rate, not a forecast of a launch date: an old protocol with no token may simply never launch, which is why rows over 730 days old carry a late flag. Only 128 of 416 token protocols report a market cap, so the comps may be biased toward larger, more liquid tokens. Gas prices and the 7.5% drop share are assumptions, not data. "Records no token" is DefiLlama\u2019s record, not proof a protocol has no token. The pre-token rule is the house\u2019s own (RULES.txt): category, name and exchange-prefix checks on the snapshot\u2019s ten fields; the snapshot names no parent protocol, so a wrapped product whose name and category hide the parent would still pass - the rule is applied as written, not extended by judgment.' })
+      el('p', { text: 'The walk-forward is a LISTING-DATE split, not a token-launch walk-forward: the snapshot is a single date (2026-11-14) with no token-launch date, so a launch-date walk-forward cannot be built from it, and none is claimed. The odds walk-forward HOLDS at all four cutoffs against the train rate (Brier 0.233 vs 0.347 at the primary cutoff, AUC 0.626) but only at the primary cutoff against the stricter test-mean base rate (0.233 vs 0.241; the others: 0.327 vs 0.247, 0.242 vs 0.237, 0.265 vs 0.250) - see Evidence 2 - and those failures are reported, not hidden. Odds are a peer rate, not a forecast of a launch date: an old protocol with no token may simply never launch, which is why rows over 730 days old carry a late flag. Only 128 of 416 token protocols report a market cap, so the comps may be biased toward larger, more liquid tokens. Gas prices and the 7.5% drop share are assumptions, not data. "Records no token" is DefiLlama\u2019s record, not proof a protocol has no token. The pre-token rule is the house\u2019s own (RULES.txt): category, name and exchange-prefix checks on the snapshot\u2019s ten fields; the snapshot names no parent protocol, so a wrapped product whose name and category hide the parent would still pass - the rule is applied as written, not extended by judgment.' })
     );
   }
 
@@ -479,7 +498,7 @@
   // rule does not change with them; see econCost.
   function econNote() {
     var dep = state.dep === 'std' ? 'standard stake (0.02% of TVL)' : '$' + state.dep.toLocaleString('en-US');
-    return 'Deposit ' + dep + ', horizon ' + state.hor + ' weeks. Net of fees = EV x 7.5% x (deposit / TVL) - gas (setup + weekly x horizon); net/hour divides it by 2.5 active hours. Real per-farmer dollars, not a wage, and they do not change the FARM / THIN / SKIP verdict, which is net/hour >= $25 at the standard stake and odds >= 45%.';
+    return 'Deposit ' + dep + ', horizon ' + state.hor + ' weeks. Net of fees = EV x 7.5% x (deposit / TVL) - gas (setup + weekly x horizon) - 2%/yr capital charge on the plan minimum; net/hour divides it by 2.5 active hours. Real per-farmer dollars; they do not change the FARM / THIN / SKIP verdict, which is net/hour >= $25 at the standard stake and odds >= 45%.';
   }
   function econPanel() {
     var deps = [['std', 'Standard (0.02% TVL)'], [1000, '$1K'], [10000, '$10K'], [100000, '$100K']];
@@ -534,6 +553,7 @@
         el('div', null, el('span', { text: 'Expected value' }), el('b', { class: 'num', text: fmtUsd(row.expected_value_usd) })),
         el('div', null, el('span', { text: 'Expected drop (' + econDepositLabel(row) + ', ' + state.hor + 'w)' }), el('b', { class: 'num', text: fmtUsd(econDrop(row)) })),
         el('div', null, el('span', { text: 'Net of fees' }), el('b', { class: 'num', text: fmtUsd(econNet(row)) })),
+        el('div', null, el('span', { text: 'Capital charge (2%/yr on $' + capitalFor(row) + ' plan capital)' }), el('b', { class: 'num', text: '$' + econCapitalCharge(row).toFixed(2) })),
         el('div', null, el('span', { text: 'Net/hour' }), el('b', { class: 'num', text: fmtUsd(econHour(row)) + '/h' })),
         el('div', null, el('span', { text: 'Honest range P10-P90' }), el('b', { class: 'num', text: fmtUsd(row.p10_value_usd) + ' - ' + fmtUsd(row.p90_value_usd) }))
       ),
@@ -541,7 +561,7 @@
     ));
     dialog.appendChild(el('section', { class: 'detail-section' },
       el('h3', { text: 'Farm plan - ' + row.verdict }),
-      el('p', { class: 'sub', text: 'Minimum capital $' + capitalFor(row) + '. Out-of-pocket cost $' + row.farm_cost_usd + ' over 8 weeks (' + row.gas_tier + ' gas tier on ' + chainOf(row) + ': $' + row.weekly_gas_usd + ' a week). About 2.5 hours active. Expected drop: implied ' + fmtUsd(row.implied_value_usd) + ' x odds ' + fmtOdds(row.token_odds) + ' = EV ' + fmtUsd(row.expected_value_usd) + '; EV x 7.5% to users x ' + econDepositLabel(row) + ' of TVL ' + fmtUsd(row.tvl_usd) + ' = ' + fmtUsd(econDrop(row)) + ' expected drop; - $' + econCost(row).toFixed(2) + ' gas = ' + fmtUsd(econNet(row)) + ' net; ' + fmtUsd(econNet(row)) + ' / 2.5h = ' + fmtUsd(econHour(row)) + '/h. Break-even odds ' + (row.breakeven_odds * 100).toFixed(1) + '% vs peer odds ' + fmtOdds(row.token_odds) + '. Verdict rule: FARM at net/hour >= $25 and odds >= 45%; THIN at net > 0; else SKIP.' }),
+      el('p', { class: 'sub', text: 'Minimum capital $' + capitalFor(row) + '. Out-of-pocket cost $' + (row.farm_cost_usd + row.farm_capital_charge_usd).toFixed(2) + ' over 8 weeks (' + row.gas_tier + ' gas tier on ' + chainOf(row) + ': $' + row.weekly_gas_usd + ' a week, plus $' + row.farm_capital_charge_usd.toFixed(2) + ' capital charge at 2%/yr). About 2.5 hours active. Expected drop: implied ' + fmtUsd(row.implied_value_usd) + ' x odds ' + fmtOdds(row.token_odds) + ' = EV ' + fmtUsd(row.expected_value_usd) + '; EV x 7.5% to users x ' + econDepositLabel(row) + ' of TVL ' + fmtUsd(row.tvl_usd) + ' = ' + fmtUsd(econDrop(row)) + ' expected drop; - $' + econGas(row).toFixed(2) + ' gas - $' + econCapitalCharge(row).toFixed(2) + ' capital charge = ' + fmtUsd(econNet(row)) + ' net; ' + fmtUsd(econNet(row)) + ' / 2.5h = ' + fmtUsd(econHour(row)) + '/h. Break-even odds ' + (row.breakeven_odds * 100).toFixed(1) + '% vs peer odds ' + fmtOdds(row.token_odds) + '. Verdict rule: FARM at net/hour >= $25 and odds >= 45%; THIN at net > 0; else SKIP.' }),
       el('ol', { class: 'steps' }, steps.map(function (s) {
         var at = s.indexOf(' Cost: ');
         var action = at >= 0 ? s.slice(0, at) : s;
@@ -563,10 +583,12 @@
     shell.appendChild(lede());
     shell.appendChild(controls());
     if (state.tab === 'pre-token') {
+      shell.appendChild(el('div', { class: 'evidence-top' },
+        el('div', { html: evidenceValueHtml() }),
+        scatterPanel()));
       shell.appendChild(el('div', { id: 'tablewrap' }, boardTable()));
       shell.appendChild(econPanel());
-      shell.appendChild(el('div', { html: evidenceHtml() }));
-      shell.appendChild(scatterPanel());
+      shell.appendChild(el('div', { html: evidenceRestHtml() }));
       shell.appendChild(auditStrip());
     } else if (state.tab === 'live') {
       shell.appendChild(liveTable());
