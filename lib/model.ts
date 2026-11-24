@@ -15,20 +15,23 @@
 // v7 refits the value slope: the free OLS slope (0.625) is the steepest of the leaders'
 // exponents (0.39-0.50), and a grid over 0.35-0.55 on the 84 trimmed comps shows 0.40 wins
 // the held-out combined score (LOO + median walk-forward miss) and beats the free slope on
-// LOO and all three walk-forwards. v7 also headlines the odds walk-forward against the
-// TRAIN rate (the leaders' no-model baseline, not the test mean), charges 2%/yr cost of
-// capital on the plan's minimum capital, and moves the value evidence table and the
-// cap-on-TVL scatter above the board so the cover shows them without scrolling.
+// LOO and all three walk-forwards. v7 variant 2 ships slope 0.45 instead: it wins LOO
+// (x2.46 vs x2.53) and split-half (1.585 vs 1.596), sits inside the bootstrap 95% CI
+// [0.446, 0.815] where 0.40 sits outside it, and its combined score (4.583) is within
+// 0.006 of 0.40's best (4.577) - the defensible runner-up, kept as the second lottery
+// ticket. v7 also headlines the odds walk-forward against the TRAIN rate (the leaders'
+// no-model baseline, not the test mean), charges 2%/yr cost of capital on the plan's
+// minimum capital, and moves the value evidence table and the cap-on-TVL scatter above
+// the board so the cover shows them without scrolling.
 //
 //   log-log fit on the 84 trimmed rule comps (mcap > 0, mcap/TVL ratio in P5-P95):
-//     log(mcap) = 9.242 + 0.400 * log(TVL) - 0.221 * log(1 + chains)   R^2 = 0.252, residual sd (log) = 1.564
+//     log(mcap) = 8.373 + 0.450 * log(TVL) - 0.218 * log(1 + chains)   R^2 = 0.266 (0.294 with the category factor), residual sd (log) = 1.549
 //   category factor: a category's median mcap/TVL over the global median 0.2293, shrunk
 //     toward 1.0 with weight n/(n+8) (n = comps in that category); only categories with
-//     n >= 8 get a factor, the rest use 1.0. On the 84-comp set the factor costs LOO
-//     log-RMSE (1.604 -> 1.637 at slope 0.40) and is neutral on the walk-forward median
-//     miss (2.05 with and without it at the primary cutoff) - it is kept because it
-//     corrects the systematic Lending bias (category holdout +1.068 log), not because it
-//     wins held-out. v7 CORRECTION: v5/v6 claimed the factor helped the walk-forward
+//     n >= 8 get a factor, the rest use 1.0. On the 84-comp set at slope 0.45 the factor
+//     costs LOO log-RMSE (1.589 -> 1.623) but wins LOO median miss (2.53 -> 2.46) - it is
+//     kept because it corrects the systematic Lending bias (category holdout +1.116 log
+//     at slope 0.45, +1.068 at the free slope) and wins held-out median miss. v7 CORRECTION: v5/v6 claimed the factor helped the walk-forward
 //     median miss (2.40 -> 2.29); 2.29 was a stale-variable bug in the v5 constants script
 //     (the WF section reused the LOO loop's fit). Recomputed cleanly, the free-slope WF
 //     with factor is 2.40, the same as without it. See TESTS-v7.md.
@@ -36,7 +39,7 @@
 //     (weight 0.15, not the starter's 0.5: peer token rates FALL with 7d growth, and the
 //     growth term changes in-sample log-RMSE by < 0.001 at any weight 0-0.5.)
 //   maturity   = 0.85 + min(age_days, 1095) / 1095 * 0.30   (age unknown: 365 days)
-//   implied    = max(1, round(exp(9.242 + 0.400*ln(TVL) - 0.221*ln(1+chains)) * category_factor * growthMult * maturityMult))
+//   implied    = max(1, round(exp(8.373 + 0.450*ln(TVL) - 0.218*ln(1+chains)) * category_factor * growthMult * maturityMult))
 //
 // v5 adds a WALK-FORWARD test everywhere, by the snapshot's DefiLlama listed_at date
 // (a listing-date split, NOT a token-launch walk-forward: the snapshot carries no
@@ -88,10 +91,10 @@
 // rank separately. Odds are the PEER PREVALENCE of a token among protocols like this one, not
 // a forecast of a launch date: an old protocol with no token may simply never launch.
 //
-// P10-P90 come from the fit's residual sd: P10 = implied / 7.42, P90 = implied * 7.42.
-// That is a factor of ~7.4 either way, and it is shown, not hidden: the held-out median
-// miss is x2.53 (LOO) and x2.05 (walk-forward), so the range is wide on purpose.
-// Measured coverage: LOO 73.8% (62/84) and walk-forward 70.0% (21/30) against 80% nominal -
+// P10-P90 come from the fit's residual sd: P10 = implied / 7.28, P90 = implied * 7.28.
+// That is a factor of ~7.3 either way, and it is shown, not hidden: the held-out median
+// miss is x2.46 (LOO) and x2.12 (walk-forward), so the range is wide on purpose.
+// Measured coverage: LOO 75.0% (63/84) and walk-forward 73.3% (22/30) against 80% nominal -
 // a little too narrow, as the dashboard states, in line with the leaders' 74-78% / 63-76%.
 //
 // Farm economics, per row, in REAL DOLLARS for one farmer (v6 fixes v5's $12.9M/hour
@@ -200,9 +203,9 @@ export interface ModelConstants {
 }
 
 export const MODEL: ModelConstants = {
-  log_intercept: 9.242,
-  log_slope: 0.4,
-  log_chains_coef: -0.2212,
+  log_intercept: 8.3732,
+  log_slope: 0.45,
+  log_chains_coef: -0.2179,
   growth_weight: 0.15,
   growth_floor: -60,
   growth_cap: 120,
@@ -210,8 +213,8 @@ export const MODEL: ModelConstants = {
   maturity_range: 0.3,
   maturity_days: 1095,
   unknown_age_days: 365,
-  resid_sd_log: 1.5636,
-  p90_factor: 7.42,
+  resid_sd_log: 1.5486,
+  p90_factor: 7.28,
   base_token_rate: 0.5488,
   logistic_lambda: 10,
   logistic_growth_cap: 30,
@@ -246,7 +249,7 @@ export function categoryFactor(category: string | null): number {
 }
 
 /** The model's version label: the dashboard names it and the rules quote it. */
-export const MODEL_VERSION = 'radar-v7';
+export const MODEL_VERSION = 'radar-v7-v2';
 
 /** How many pre-token protocols below the watchlist floor the early radar carries, by TVL.
  * v4: the early set is every house-rule rankable protocol the watchlist does not name,
@@ -260,37 +263,38 @@ export const LIVE_ROWS = 24;
 /** Held-out test results, computed from snapshot.json at build time (see TESTS-v2.md). */
 export const TEST_RESULTS = {
   method: 'Leave-one-out, split-half (20 seeds), 5-fold out-of-fold, category holdout and a LISTING-DATE WALK-FORWARD (train on protocols DefiLlama listed before a cutoff, test on those listed after it) on the 84 trimmed rule comps (mcap > 0, passes the house pre-token rule, mcap/TVL in P5-P95) for value; split-half (20 seeds) and 5-fold out-of-fold on all 758 protocols for the token-odds logistic, plus the same listing-date walk-forward for odds and ranges. The walk-forward is a listing-date split, NOT a token-launch walk-forward: the snapshot carries no token-launch date.',
-  // v7 value model: log(mcap) = 9.242 + 0.400*log(TVL) - 0.221*log(1+chains), fitted on the
-  // 84 trimmed rule comps. Slope 0.40 chosen on the held-out grid (see v7_value_slope_grid):
-  // it beats the free OLS slope (0.625) on LOO and on all three walk-forwards. LOO and WF
-  // (cutoff 2024-07-15, train 33 / test 30) below, recomputed for the shipped slope.
-  loo_trimmed_log_rmse: 1.637,
-  loo_trimmed_median_miss: 2.53,
+  // v7 variant 2 value model: log(mcap) = 8.373 + 0.450*log(TVL) - 0.218*log(1+chains), fitted on the
+  // 84 trimmed rule comps. Slope 0.45 chosen on the held-out grid (see v7_value_slope_grid):
+  // it wins LOO (x2.46 vs x2.53 for 0.40) and split-half (1.585 vs 1.596), sits inside the
+  // bootstrap 95% CI [0.446, 0.815], and its combined score (4.583) is within 0.006 of 0.40's
+  // best (4.577). LOO and WF (cutoff 2024-07-15, train 33 / test 30) below, recomputed for the shipped slope.
+  loo_trimmed_log_rmse: 1.623,
+  loo_trimmed_median_miss: 2.46,
   loo_trimmed_flat_log_rmse: 1.817,
   loo_trimmed_flat_median_miss: 3.12,
-  loo_no_factor_log_rmse: 1.604,
-  loo_no_factor_median_miss: 2.54,
+  loo_no_factor_log_rmse: 1.589,
+  loo_no_factor_median_miss: 2.53,
   loo_all128_log_rmse: 2.107,
   loo_all128_flat_log_rmse: 2.277,
   loo_category_shrunk_log_rmse: 1.613,
   loo_v4_shipped_log_rmse: 1.618,
   loo_v4_shipped_median_miss: 3.15,
-  split_half_log_rmse_mean: 1.596,
-  split_half_log_rmse_min: 1.404,
-  split_half_log_rmse_max: 1.831,
+  split_half_log_rmse_mean: 1.585,
+  split_half_log_rmse_min: 1.402,
+  split_half_log_rmse_max: 1.814,
   split_half_flat_log_rmse_mean: 1.815,
   split_half_starter_log_rmse_mean: 1.688,
-  // v7: category holdout on the 84 trimmed rule comps, slope 0.40, base + log(1+chains)
+  // v7 variant 2: category holdout on the 84 trimmed rule comps, slope 0.45, base + log(1+chains)
   // fit refit without that category. Bias > 0 means the global fit overpredicts the category
   // (bias = mean predicted - actual, the v5 convention). Lending is still the outlier
-  // (+1.141 log, vs +1.068 at the free slope): the k=8 factor is kept to correct it.
+  // (+1.116 log, vs +1.141 at slope 0.40 and +1.068 at the free slope): the k=8 factor is kept to correct it.
   // Only the four categories with n >= 8 in the trimmed 92 can be held out; Liquid
   // Staking and CEX have no comps in the 92 and cannot be held out at all.
   category_holdout: [
-    { category: 'Lending', n: 14, log_rmse: 2.283, bias_log: 1.141 },
-    { category: 'Dexs', n: 11, log_rmse: 2.094, bias_log: -0.173 },
-    { category: 'RWA', n: 9, log_rmse: 0.678, bias_log: -0.44 },
-    { category: 'Yield', n: 8, log_rmse: 1.413, bias_log: 0.101 },
+    { category: 'Lending', n: 14, log_rmse: 2.253, bias_log: 1.116 },
+    { category: 'Dexs', n: 11, log_rmse: 2.075, bias_log: -0.2 },
+    { category: 'RWA', n: 9, log_rmse: 0.659, bias_log: -0.406 },
+    { category: 'Yield', n: 8, log_rmse: 1.368, bias_log: 0.073 },
   ],
   // v5: the value-model term table. A term is KEPT only when the median miss improves in
   // BOTH leave-one-out and the walk-forward (cutoff 2024-07-15). Median miss = exp(median
@@ -314,11 +318,13 @@ export const TEST_RESULTS = {
   // comps and the wrong beta). Intercept + chains coef refit at each fixed slope; category
   // factor k=8 refit in-fold / on train. Selection rule: minimize LOO + median-of-three-WF
   // median miss, and beat the free slope on LOO and all three walk-forwards. 0.40 wins the
-  // combined score (4.577 vs 0.45's 4.583) and wins all three WFs; 0.45 wins only LOO.
+  // combined score (4.577 vs 0.45's 4.583) by 0.006 and wins all three WFs; 0.45 wins LOO
+  // (2.46 vs 2.53) and split-half (1.585 vs 1.596).
   // Bootstrap (200 refits, seed 11): the free slope is 0.627 +- 0.092, 95% CI [0.446, 0.815],
-  // so 0.40 sits 2.45 s.e. below the OLS point estimate and just outside its 95% CI, while
-  // 0.45 sits just inside it. The shipped slope is chosen on held-out miss, not in-sample
-  // fit, and the dashboard says so - 0.45 is the runner-up, kept for variant 2.
+  // so 0.45 sits 1.90 s.e. below the OLS point estimate and just inside its 95% CI, while
+  // 0.40 sits 2.45 s.e. below it and just outside the CI. Variant 2 ships 0.45: the LOO
+  // winner and the defensible slope inside the CI, as the second lottery ticket. The shipped
+  // slope is chosen on held-out miss, not in-sample fit, and the dashboard says so.
   v7_value_slope_grid: [
     { slope: 0.35, loo_median_miss: 2.58, loo_log_rmse: 1.656, wf_2024_07_15: 2.09, wf_2024_01_01: 2.1, wf_2025_01_01: 2.44, wf_median: 2.1, combined: 4.681 },
     { slope: 0.4, loo_median_miss: 2.53, loo_log_rmse: 1.637, wf_2024_07_15: 2.05, wf_2024_01_01: 2.02, wf_2025_01_01: 2.32, wf_median: 2.05, combined: 4.577 },
@@ -328,7 +334,7 @@ export const TEST_RESULTS = {
     { slope: 'free (0.625)', loo_median_miss: 3.07, loo_log_rmse: 1.613, wf_2024_07_15: 2.4, wf_2024_01_01: 2.15, wf_2025_01_01: 2.56, wf_median: 2.4, combined: 5.471 },
   ],
   v7_slope_decision:
-    'Ship slope 0.40. It wins the combined held-out score (LOO 2.53 + WF median 2.05 = 4.577, against 0.45 at 4.583 and the free slope at 5.471), wins all three walk-forwards against the free slope (2.05/2.02/2.32 vs 2.40/2.15/2.56), and wins split-half (log-RMSE 1.596 vs 1.621 free). It loses LOO to 0.45 (2.53 vs 2.46) and in-sample R2 falls (0.252 vs 0.288) - R2 is no longer displayed on the dashboard. The free slope minimizes in-sample squared error, not held-out median miss; the grid optimizes the leaders\' median-miss scale instead. Bootstrap s.e. of the free slope is 0.092 (200 refits): 0.40 is 2.45 s.e. below the OLS estimate, stated on the dashboard, not hidden.',
+    'Variant 2 ships slope 0.45. It wins LOO (2.46 vs 2.53 for slope 0.40, 3.07 free) and split-half (log-RMSE 1.585 vs 1.596 for 0.40, 1.621 free), sits inside the bootstrap 95% CI [0.446, 0.815] (1.90 s.e. below the OLS estimate, where 0.40 sits 2.45 s.e. below it and just outside the CI), and its combined score (LOO 2.46 + WF median 2.12 = 4.583) is within 0.006 of 0.40\'s best (4.577). It loses all four walk-forwards to 0.40 (2.12/2.10/2.47/2.15 vs 2.05/2.02/2.32/2.13) but still beats the free slope on LOO and every walk-forward (2.46 vs 3.07; 2.12/2.10/2.47/2.15 vs 2.40/2.15/2.56/2.40). In-sample R2 is 0.266 (0.294 with the factor) vs 0.252/0.280 at 0.40 - R2 is no longer displayed on the dashboard. The free slope minimizes in-sample squared error, not held-out median miss; the grid optimizes the leaders\' median-miss scale instead. Bootstrap s.e. of the free slope is 0.092 (200 refits), stated on the dashboard, not hidden.',
   // v7 CORRECTIONS to numbers v5/v6 reported (all recomputed from snapshot.json; see TESTS-v7.md):
   // (1) The shipped WF x2.29 (v5/v6) was a stale-variable bug: tests_v5_constants.py reused
   // the LOO loop's fit in its WF section. Recomputed cleanly the free-slope WF with factor is
@@ -346,20 +352,20 @@ export const TEST_RESULTS = {
   // fallback (hardcoded 0.5488); with the fitting set's base rate as the fallback, B2's OOF
   // log-loss worsens by 0.028, above the 0.01 adoption limit - B2 is NOT adopted, B0 stands.
   v7_corrections:
-    'WF x2.29 was a stale-variable bug (correct: x2.40); train_token_rate 2023-07-01 0.781 and 2025-01-01 0.658 (not 0.852/0.689), 2024-01-01 0.785 (not 0.791); odds OOF 0.583 is the 11-feature verify variant, the shipped 10-feature model scores 0.585; B2 rejected (OOF worsens 0.028 > 0.01 limit).',
-  // v7: walk-forward for value, FOUR cutoffs (train/test counts are dated trimmed comps),
-  // recomputed for the shipped slope 0.40 (intercept + chains coef refit on train, factor
+    'WF x2.29 was a stale-variable bug (correct: x2.40); train_token_rate 2023-07-01 0.781 and 2025-01-01 0.658 (not 0.852/0.689), 2024-01-01 0.785 (not 0.791); odds OOF 0.583 is the 11-feature verify variant, the shipped 10-feature model scores 0.585; B2 rejected (OOF worsens 0.028 > 0.01 limit). Variant 2 refits at slope 0.45 (intercept 8.373, chains -0.218, resid sd 1.549, P90 x7.28); odds B0 unchanged, re-confirmed (WF Brier 0.267/0.328/0.233/0.241 Python vs shipped TS 0.265/0.327/0.233/0.242).',
+  // v7 variant 2: walk-forward for value, FOUR cutoffs (train/test counts are dated trimmed comps),
+  // recomputed for the shipped slope 0.45 (intercept + chains coef refit on train, factor
   // from train). The v5/v6 numbers (free slope, adopted x2.29 at the primary cutoff) are in
   // TESTS-v5.md; x2.29 was the stale-variable bug, the clean free-slope number is x2.40.
-  // At slope 0.40 the model still loses the 2025-01-01 cutoff to the base (2.32 vs 2.05),
-  // as it did at the free slope (2.56 vs 2.05) - reported, not hidden.
+  // At slope 0.45 the model still loses the 2025-01-01 cutoff to the base (2.47 vs 2.05),
+  // as it did at 0.40 (2.32) and at the free slope (2.56) - reported, not hidden.
   v5_value_walk_forward: {
     definition: 'Train on rule comps DefiLlama listed before the cutoff, test on those listed after it. 22 of the 92 rule comps have no listed_at and are excluded from the walk-forward test only. This is a LISTING-DATE split, not a token-launch walk-forward.',
-    cutoff_2024_07_15: { train_n: 33, test_n: 30, base_log_rmse: 1.4015, base_median_miss: 2.56, adopted_log_rmse: 1.3692, adopted_median_miss: 2.05 },
-    cutoff_2025_01_01: { train_n: 39, test_n: 24, base_log_rmse: 1.3172, base_median_miss: 2.05, adopted_log_rmse: 1.3439, adopted_median_miss: 2.32 },
-    cutoff_2024_01_01: { train_n: 27, test_n: 36, base_log_rmse: 1.4466, base_median_miss: 2.4, adopted_log_rmse: 1.4528, adopted_median_miss: 2.02 },
-    cutoff_2023_07_01: { train_n: 21, test_n: 42, base_log_rmse: 1.4132, base_median_miss: 2.55, adopted_log_rmse: 1.4129, adopted_median_miss: 2.13 },
-    leaders_for_comparison: 'kevin WF x2.26, kiencx WF x2.53, nyx77 WF x2.60, swift-orca WF x3.51 (their LOO: kevin x2.99, nyx77 x3.21, kiencx x3.33). Ours, slope 0.40: LOO x2.53, WF x2.05 at the primary cutoff (v6 free slope: LOO x3.07, WF x2.40).',
+    cutoff_2024_07_15: { train_n: 33, test_n: 30, base_log_rmse: 1.4015, base_median_miss: 2.56, adopted_log_rmse: 1.3591, adopted_median_miss: 2.12 },
+    cutoff_2025_01_01: { train_n: 39, test_n: 24, base_log_rmse: 1.3172, base_median_miss: 2.05, adopted_log_rmse: 1.3211, adopted_median_miss: 2.47 },
+    cutoff_2024_01_01: { train_n: 27, test_n: 36, base_log_rmse: 1.4466, base_median_miss: 2.4, adopted_log_rmse: 1.4413, adopted_median_miss: 2.1 },
+    cutoff_2023_07_01: { train_n: 21, test_n: 42, base_log_rmse: 1.4132, base_median_miss: 2.55, adopted_log_rmse: 1.4061, adopted_median_miss: 2.15 },
+    leaders_for_comparison: 'kevin WF x2.26, kiencx WF x2.53, nyx77 WF x2.60, swift-orca WF x3.51 (their LOO: kevin x2.99, nyx77 x3.21, kiencx x3.33). Ours, slope 0.45: LOO x2.46, WF x2.12 at the primary cutoff (variant 1 slope 0.40: LOO x2.53, WF x2.05; v6 free slope: LOO x3.07, WF x2.40).',
   },
   listed_date_split_log_rmse: 1.524,
   listed_date_split_bias_log: -0.524,
@@ -367,19 +373,19 @@ export const TEST_RESULTS = {
   listed_date_split_test_n: 27,
   listed_date_split_reverse_log_rmse: 1.61,
   growth_weight_sensitivity: 'in-sample log-RMSE 1.594 at weight 0, 1.594 at 0.15, 1.595 at 0.5: the growth term is inert.',
-  // v7: category-factor sweep at the shipped slope 0.40 (LOO, factors refit inside each
-  // fold, 84 comps). k = 8 costs 0.033 log units against no factor (1.637 vs 1.604) and is
-  // tied on median miss (2.53 vs 2.54); it is kept because it corrects the systematic
-  // Lending bias (category holdout +1.141 log), not because it wins held-out.
+  // v7 variant 2: category-factor sweep at the shipped slope 0.45 (LOO, factors refit inside each
+  // fold, 84 comps). k = 8 costs 0.034 log units against no factor (1.623 vs 1.589) and WINS
+  // on median miss (2.46 vs 2.53); it is kept because it corrects the systematic
+  // Lending bias (category holdout +1.116 log) and wins held-out median miss, not just for the bias.
   category_factor_sweep: [
-    { k: 0, loo_log_rmse: 1.804 },
-    { k: 2, loo_log_rmse: 1.691 },
-    { k: 4, loo_log_rmse: 1.649 },
-    { k: 8, loo_log_rmse: 1.637 },
-    { k: 16, loo_log_rmse: 1.604 },
-    { k: 32, loo_log_rmse: 1.604 },
-    { k: 64, loo_log_rmse: 1.604 },
-    { k: 'inf (no factor)', loo_log_rmse: 1.604 },
+    { k: 0, loo_log_rmse: 1.785 },
+    { k: 2, loo_log_rmse: 1.68 },
+    { k: 4, loo_log_rmse: 1.636 },
+    { k: 8, loo_log_rmse: 1.623 },
+    { k: 16, loo_log_rmse: 1.589 },
+    { k: 32, loo_log_rmse: 1.589 },
+    { k: 64, loo_log_rmse: 1.589 },
+    { k: 'inf (no factor)', loo_log_rmse: 1.589 },
   ],
   // v6: walk-forward for the token-odds logistic (log-age + age bands + shrunk category
   // rate, shrink 50). The v6 model PASSES the primary split - the first odds model of this
@@ -406,21 +412,21 @@ export const TEST_RESULTS = {
     why_it_passes_now: 'Two changes, both needed (ablation: log-age without the category rate scores 0.264; category rate without log-age scores 0.334). (1) log(age+1) is identified in the age-homogeneous train cohort (ages 852-3000+ days) and extrapolates monotonically to the younger test cohort, fixing calibration: mean predicted 44% vs 41% observed (v5: 71% vs 41%). (2) The category signal is carried by ONE shrunk rate instead of fourteen one-hot weights: category token rates fall hard train->test (Bridge 0.72 to 0.36, Liquid Staking 0.68 to 0.29, Yield 1.00 to 0.36), so the one-hot weights over-predict on young protocols; the shrunk rate keeps the ordering (Dexs/Lending high, Risk Curators/CEX low) with one coefficient, which transfers. The second cutoffs fail because their train cohorts are even older/more homogeneous (2024-01-01: every train protocol is 1048+ days old) or their test cohorts are narrower (2025-01-01: 163 protocols over 11 months).',
     leaders_for_comparison: 'kiencx WF Brier 0.218, kevin WF Brier 0.240 (their LOO Brier: kiencx 0.188, kevin 0.193). Ours: OOF Brier 0.200, WF Brier 0.233 at the primary cutoff - in the leaders\' range for the first time.',
   },
-  // v7: range coverage, LOO and walk-forward. P10-P90 = implied / 7.42 to x 7.42 (resid sd
-  // 1.5636 with the category factor, slope 0.40). LOO coverage uses the full-fit sd for the
+  // v7 variant 2: range coverage, LOO and walk-forward. P10-P90 = implied / 7.28 to x 7.28 (resid sd
+  // 1.5486 with the category factor, slope 0.45). LOO coverage uses the full-fit sd for the
   // half-width; WF coverage uses the TRAIN fit's sd (the v5 constants protocol). Both are
   // below the 80% nominal - a little too narrow, as the dashboard states, in line with the
-  // leaders (kiencx 78%/76%, kevin 78%/73%, nyx77 74%/63%). The WF coverage fell from v6's
-  // 73.3% to 70.0%: the flatter slope buys median miss and pays a little coverage.
+  // leaders (kiencx 78%/76%, kevin 78%/73%, nyx77 74%/63%). The WF coverage rose from variant 1's
+  // 70.0% to 73.3%: the steeper slope buys a little coverage back.
   v5_range_walk_forward: {
-    loo_coverage: 0.738,
-    loo_covered: 62,
+    loo_coverage: 0.75,
+    loo_covered: 63,
     loo_n: 84,
-    wf_coverage: 0.7,
-    wf_covered: 21,
+    wf_coverage: 0.733,
+    wf_covered: 22,
     wf_n: 30,
-    p90_factor: 7.42,
-    decision: 'Keep the normal P10-P90. LOO 73.8% and WF 70.0% against 80% nominal is a little too narrow, stated as measured, in line with the leaders.',
+    p90_factor: 7.28,
+    decision: 'Keep the normal P10-P90. LOO 75.0% and WF 73.3% against 80% nominal is a little too narrow, stated as measured, in line with the leaders.',
   },
   // v7: the verdict rule is now on real per-farmer dollars (net/hour at the standard stake,
   // 0.02% of TVL, and the odds floor), so the sweep is on those two knobs. The literal
@@ -428,20 +434,20 @@ export const TEST_RESULTS = {
   // it makes 136 rows FARM, including Sentora Curator (11.8% odds) and Nonce Capital (7.6%).
   verdict_sweep: {
     net_hour_thresholds_odds_floor_45: [
-      { net_hour_usd: 15, farm: 47 },
-      { net_hour_usd: 25, farm: 31 },
-      { net_hour_usd: 40, farm: 13 },
-      { net_hour_usd: 60, farm: 5 },
+      { net_hour_usd: 15, farm: 46 },
+      { net_hour_usd: 25, farm: 29 },
+      { net_hour_usd: 40, farm: 15 },
+      { net_hour_usd: 60, farm: 6 },
     ],
     odds_floor_thresholds_net_hour_25: [
-      { threshold: 0.4, farm: 34, thin: 106, skip: 58, enters_vs_045: ['usdd', 'veda', 'doppler-finance'] },
-      { threshold: 0.45, farm: 31, thin: 109, skip: 58, enters_vs_045: [] },
-      { threshold: 0.5, farm: 31, thin: 109, skip: 58, leaves_vs_045: [] },
+      { threshold: 0.4, farm: 32, thin: 106, skip: 60, enters_vs_045: ['usdd', 'veda', 'doppler-finance'] },
+      { threshold: 0.45, farm: 29, thin: 109, skip: 60, enters_vs_045: [] },
+      { threshold: 0.5, farm: 29, thin: 109, skip: 60, leaves_vs_045: [] },
     ],
-    literal_implied_formula_no_odds_floor: { farm: 136, thin: 62, skip: 0 },
-    breakeven_odds: { max: 0.993, max_row: 'mev-capital', median: 0.198, p90: 0.498, rows_above_45pct: 27, rows_above_100pct: 0 },
+    literal_implied_formula_no_odds_floor: { farm: 126, thin: 69, skip: 3 },
+    breakeven_odds: { max: 1.058, max_row: 'mev-capital', median: 0.201, p90: 0.517, rows_above_45pct: 27, rows_above_100pct: 3 },
     decision:
-      'Keep FARM at net/hour >= $25 and odds >= 45%. The odds floor is now a real cost cover, not just a likelihood standard: break-even odds are 19.9% at the median and 50.1% at p90, 27 rows need more than 45% odds for the expected drop to cover the fee at all, and no row is above 100% (worst is mev-capital at 99.3%). A 40% floor admits three rows - usdd, veda (43.3%) and doppler-finance - and 50% drops nothing, so the 45% floor sits on a flat part of the sweep. The $25/hour bar is the sensitive knob instead: $15 gives 47 FARM, $40 gives 13, $60 gives 5. The FARM set keeps 26 of the 28 v6 FARM slugs (ipor-fusion and flux-finance drop out on the flatter slope) and adds 5 rows (manta-cedefi, manifest-trade, stellar-dex, metalx-swap, katana-dex), for 31 FARM of 198. The literal implied-value rule (136 FARM) is rejected: it never asks whether the token launches.',
+      'Keep FARM at net/hour >= $25 and odds >= 45%. The odds floor is now a real cost cover, not just a likelihood standard: break-even odds are 20.1% at the median and 51.7% at p90, 27 rows need more than 45% odds for the expected drop to cover the fee at all, and 3 rows need more than 100% (worst is mev-capital at 105.8%, then flying-tulip-ftusd at 105.5% and damm-capital at 103.8%) - even a certain launch does not cover the fee on those rows; variant 1 had none above 100% (worst 99.3%). A 40% floor admits three rows - usdd, veda (43.3%) and doppler-finance - and 50% drops nothing, so the 45% floor sits on a flat part of the sweep. The $25/hour bar is the sensitive knob instead: $15 gives 46 FARM, $40 gives 15, $60 gives 6. The FARM set keeps 29 of variant 1\'s 31 (manta-cedefi and metalx-swap drop out on the steeper slope) and adds none, for 29 FARM of 198. The literal implied-value rule (126 FARM) is rejected: it never asks whether the token launches.',
   },
   // v5: ranking impact of the value model's category factor (same odds, implied recomputed
   // on the v5 board). Unlike v4, the top-10 EV set is NOT stable without the factor.
@@ -575,24 +581,24 @@ export const TEST_RESULTS = {
     { variant: '+ log(1+chains) + log(age)', loo_log_rmse: 1.5981, loo_median_miss: 3.1, wf_median_miss: 6.01 },
     { variant: 'fit on all 128 comps (v4)', loo_log_rmse: 1.6184, loo_median_miss: 3.15, wf_median_miss: 3.04 },
   ],
-  // v7: the shipped P10-P90 range (implied / 7.42 to x 7.42, resid sd 1.5636). LOO coverage
-  // 62/84 = 0.738 and walk-forward coverage 21/30 = 0.700 against the 0.80 nominal - a
+  // v7 variant 2: the shipped P10-P90 range (implied / 7.28 to x 7.28, resid sd 1.5486). LOO coverage
+  // 63/84 = 0.750 and walk-forward coverage 22/30 = 0.733 against the 0.80 nominal - a
   // little too narrow, stated as measured, in line with the leaders (kiencx 78%/76%,
   // kevin 78%/73%, nyx77 74%/63%). Split-conformal was tested in v4 and rejected (wider at
   // the same coverage); the normal interval stays.
   v5_range_coverage: {
-    shipped_p10_p90_loo_coverage: 0.738,
-    shipped_p10_p90_loo_covered: 62,
+    shipped_p10_p90_loo_coverage: 0.75,
+    shipped_p10_p90_loo_covered: 63,
     shipped_p10_p90_loo_n: 84,
-    shipped_p10_p90_wf_coverage: 0.7,
-    shipped_p10_p90_wf_covered: 21,
+    shipped_p10_p90_wf_coverage: 0.733,
+    shipped_p10_p90_wf_covered: 22,
     shipped_p10_p90_wf_n: 30,
-    shipped_p10_p90_log_width: 4.008,
+    shipped_p10_p90_log_width: 3.969,
     conformal_global_coverage: 0.792,
     conformal_global_log_width: 4.164,
     conformal_per_category_coverage: 0.797,
     conformal_per_category_log_width: 4.196,
-    decision: 'Keep the shipped normal P10-P90 (implied / 7.42 to x 7.42). LOO 73.8% and WF 70.0% vs 80% nominal is a little too narrow, stated as measured, in line with the leaders.',
+    decision: 'Keep the shipped normal P10-P90 (implied / 7.28 to x 7.28). LOO 75.0% and WF 73.3% vs 80% nominal is a little too narrow, stated as measured, in line with the leaders.',
   },
   // v5: board coverage under the house's pre-token rule (RULES.txt, the watchlist's own
   // definition - see isRankable). The snapshot holds 342 pre-token records; 198 pass the
@@ -787,8 +793,8 @@ export function ageDays(asOf: string, listedAt: string | null): number | null {
 }
 
 /** The fitted log-log base value and the multipliers and the implied value one protocol gets.
- * v7: the base is exp(9.242 + 0.400*ln(TVL) - 0.221*ln(1+chains)), fitted on the 84 trimmed
- * rule comps (see the header comment and TESTS-v7.md). */
+ * v7 variant 2: the base is exp(8.373 + 0.450*ln(TVL) - 0.218*ln(1+chains)), fitted on the 84 trimmed
+ * rule comps (see the header comment and TESTS-v7-v2.md). */
 export function impliedValue(protocol: SnapshotProtocol, asOf: string, model: ModelConstants): { implied: number; baseLogLog: number; categoryFactor: number; growthPct: number; growthMult: number; maturityMult: number; age: number | null; chainsCount: number; chainsMult: number } {
   const age = ageDays(asOf, protocol.listed_at);
   const rawGrowth = finite(protocol.change_7d, 0);
