@@ -1,5 +1,4 @@
-/* Token Radar's plain theme. The five palette values, two radii and two families are the whole style;
-   everything else is spacing, a hairline and a type step. */
+/* Token Radar's plain theme: five palette values, two radii, two families. */
 :root {
   --canvas: #f2f5f3;
   --surface: #ffffff;
@@ -131,13 +130,13 @@ tbody tr[data-selected="true"] { background: color-mix(in srgb, var(--accent) 8%
   *, *::before, *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; }
 }
 
-/* v5 additions: proof cover, verdicts, integrity strip, methodology, evidence tables, scatter, econ. */
+/* v5: proof cover, verdicts, integrity strip, methodology, evidence, scatter, econ. */
 .proof-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--step-2); margin-top: var(--step-3); }
 .proof { display: grid; gap: 2px; padding: var(--step-2) var(--step-3); border: 1px solid var(--border); border-radius: var(--radius-panel); background: var(--surface); }
 .proof-title { color: var(--muted); font-size: 12px; }
 .proof-big { font-family: var(--font-num); font-size: 13px; font-weight: 600; }
 .evidence { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--step-2); margin-top: var(--step-3); }
-/* v7: Evidence 1 + scatter above the board, two columns; the scatter drops its top margin inside. */
+/* v7: Evidence 1 + scatter above the board. */
 .evidence-top { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--step-2); margin-top: var(--step-3); }
 .evidence-top .scatter { margin-top: 0; }
 .ev { border: 1px solid var(--border); border-radius: var(--radius-panel); background: var(--surface); overflow: hidden; }
@@ -169,3 +168,9 @@ tbody tr[data-selected="true"] { background: color-mix(in srgb, var(--accent) 8%
   .proof-grid { grid-template-columns: 1fr; }
   .evidence, .evidence-top { grid-template-columns: 1fr; }
 }
+
+/* v3: denser board rows (P5) and the expanded farm plan table (P2). */
+#tablewrap td { padding-top: 5px; padding-bottom: 5px; }
+#tablewrap .plan td { padding: 3px 8px; font-size: 12px; }
+#tablewrap .plan th { padding: 3px 8px; }
+.plan h3 { margin-bottom: 4px; }
