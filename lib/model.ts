@@ -249,7 +249,7 @@ export function categoryFactor(category: string | null): number {
 }
 
 /** The model's version label: the dashboard names it and the rules quote it. */
-export const MODEL_VERSION = 'radar-v7-v2';
+export const MODEL_VERSION = 'radar-v7-v3';
 
 /** How many pre-token protocols below the watchlist floor the early radar carries, by TVL.
  * v4: the early set is every house-rule rankable protocol the watchlist does not name,
@@ -309,6 +309,14 @@ export const TEST_RESULTS = {
     { variant: '+ log(1+chains) + growth', loo_log_rmse: 1.598, loo_median_miss: 2.89, wf_log_rmse: 1.3401, wf_median_miss: 2.31, kept: false },
     { variant: '+ log(age)', loo_log_rmse: 1.5866, loo_median_miss: 3.04, wf_log_rmse: 1.6362, wf_median_miss: 2.95, kept: false },
     { variant: '+ log(1+chains) + log(age)', loo_log_rmse: 1.5981, loo_median_miss: 3.1, wf_log_rmse: 2.2338, wf_median_miss: 6.01, kept: false },
+    // v7 variant 3: CONTROL row (kiencx's format: "growth of another row, must not help").
+    // 7-day growth of ANOTHER row (comps sorted by slug, partner = next row, wrap), free-slope
+    // OLS, no category factor — the same protocol as the rows above (validated by reproducing
+    // all six shipped rows exactly). LOO x2.89 / WF x2.54 vs +chains x2.91 / x2.40: it does NOT
+    // win both splits, so it is not kept — the 0.02 LOO gain is one comp's noise, the 0.14 WF
+    // loss is the signal. Cross-check: a random-number control scores LOO x3.07 / WF x2.48
+    // (loses both). See TESTS-v7-v3.md.
+    { variant: '+ control: 7d growth of another row', loo_log_rmse: 1.5559, loo_median_miss: 2.89, wf_log_rmse: 1.5475, wf_median_miss: 2.54, kept: false, control: true },
   ],
   v5_value_term_decision:
     'Adopt + log(1+chains): it wins the median miss in BOTH LOO (2.91 vs 3.00) and walk-forward (2.40 vs 2.56), wins split-half (2.40 vs 2.62 over 20 seeds) and wins the 2024-01-01 walk-forward (2.15 vs 2.40). It loses only the 2025-01-01 walk-forward (2.56 vs 2.05, n=24 youngest comps) - reported, not hidden. Growth as a regression term wins the walk-forward (2.28) but adds nothing on top of chains (2.31 vs 2.40) and would double-count the shipped 0.15 growth multiplier, so it is not adopted. Log-age wins LOO (2.50 on the dated subset) but destroys the walk-forward (2.95, and 6.01 with chains) - it does not generalize across time, rejected. The category factor (k=8) costs LOO (median miss 2.91 -> 3.07) but helps the walk-forward median miss (2.40 -> 2.29) and corrects the systematic Lending bias, so it is kept.',
@@ -427,6 +435,77 @@ export const TEST_RESULTS = {
     wf_n: 30,
     p90_factor: 7.28,
     decision: 'Keep the normal P10-P90. LOO 75.0% and WF 73.3% against 80% nominal is a little too narrow, stated as measured, in line with the leaders.',
+  },
+  // v7 variant 3: IS THE PRINTED RANGE HONEST? P25-P75 coverage, same normal-interval
+  // convention as the shipped P10-P90 (half-width 0.6745*sd for P25-P75, 1.2816*sd for
+  // P10-P90; LOO uses the full-fit sd, WF the train sd — the v5 constants protocol,
+  // validated by reproducing P10-P90 63/84 and 22/30 first). The middle half is honest —
+  // slightly WIDE (LOO 53.6%, WF 56.7% vs 50% stated) — while the outer band runs a
+  // little narrow (LOO 75.0%, WF 73.3% vs 80% stated). Leaders for comparison (LOO/WF):
+  // kiencx P25-P75 49%/57%, P10-P90 78%/76%. See TESTS-v7-v3.md.
+  v7_range_honesty: {
+    p25_stated: 0.5,
+    p25_loo_coverage: 0.536,
+    p25_loo_covered: 45,
+    p25_loo_n: 84,
+    p25_wf_coverage: 0.567,
+    p25_wf_covered: 17,
+    p25_wf_n: 30,
+    p25_wf_all: {
+      cutoff_2023_07_01: { covered: 23, n: 42, coverage: 0.548 },
+      cutoff_2024_01_01: { covered: 18, n: 36, coverage: 0.5 },
+      cutoff_2024_07_15: { covered: 17, n: 30, coverage: 0.567 },
+      cutoff_2025_01_01: { covered: 13, n: 24, coverage: 0.542 },
+    },
+    p90_stated: 0.8,
+    p90_loo_coverage: 0.75,
+    p90_loo_covered: 63,
+    p90_loo_n: 84,
+    p90_wf_coverage: 0.733,
+    p90_wf_covered: 22,
+    p90_wf_n: 30,
+    decision: 'The printed P25-P75 is honest (53.6% LOO / 56.7% WF vs 50% stated — a touch wide); the printed P10-P90 runs a little narrow (75.0% / 73.3% vs 80% stated). Both stated as measured.',
+  },
+  // v7 variant 3: BOOTSTRAP RANK RANGE. 200 refits (seed 11), slope-fixed 0.45 model
+  // refit on resampled 84 comps (intercept + chains + k=8 factors), all 198 board rows
+  // re-priced each time. Validated by re-pricing with the shipped beta first (0/198 rows
+  // off by >0.1%). Rank 1 (Sentora, $52.1M) held in only 53% of refits — the top of the
+  // board is not stable under refitting, stated as measured (leaders claim 100%).
+  v7_rank_range: {
+    refits: 200,
+    sentora_rank1_held: 106,
+    sentora_rank1_pct: 0.53,
+    top5: [
+      { slug: 'sentora-curator', median_rank: 1, p5_rank: 1, p95_rank: 4, min_rank: 1, max_rank: 7 },
+      { slug: 'steakhouse-financial', median_rank: 2, p5_rank: 1, p95_rank: 9, min_rank: 1, max_rank: 27 },
+      { slug: 'usdd', median_rank: 5, p5_rank: 2, p95_rank: 9, min_rank: 2, max_rank: 20 },
+      { slug: 'veda', median_rank: 5, p5_rank: 3, p95_rank: 22, min_rank: 3, max_rank: 53 },
+      { slug: 'gauntlet', median_rank: 6, p5_rank: 3, p95_rank: 24, min_rank: 2, max_rank: 60 },
+    ],
+  },
+  // v7 variant 3: ODDS CONTROL (silver-ibis's format: "a random number, must not help").
+  // One random-number feature (seed 11) added to the B0 logistic: OOF log-loss 0.584 vs
+  // 0.585 without it, AUC 0.754, Brier 0.200 vs 0.201; WF Brier 0.234 vs 0.233. The 0.001
+  // OOF gain is noise — the same feature scores slightly WORSE on the walk-forward — so
+  // the control does not help. Cross-check for the value control in the term table.
+  v7_odds_control: {
+    oof_logloss: 0.584,
+    oof_auc: 0.754,
+    oof_brier: 0.2,
+    wf_brier_2024_07_15: 0.234,
+    wf_train_rate_brier_2024_07_15: 0.347,
+    decision: 'A random-number feature gains nothing (OOF 0.584 vs 0.585, WF 0.234 vs 0.233): the odds model is not fitting noise.',
+  },
+  // v7 variant 3: ODDS SHRINK SWEEP (P6, secondary, NOT adopted). Category-rate shrink
+  // 25/50/100: primary-cutoff margin 0.113/0.114/0.115 — no shrink reaches the 0.14 target
+  // (best leader margin 0.191 exmachina, 0.156 europa, 0.141 behzad), and shrink 100 gains
+  // only 0.001 margin and 0.001 OOF log-loss over B0 (noise). All three HOLD 4/4 vs the
+  // train rate. B0 (shrink 50) stands; changing the odds model for 0.001 is not a variant.
+  v7_odds_shrink_sweep: {
+    shrink_25: { oof_logloss: 0.587, oof_auc: 0.752, oof_brier: 0.201, margin_2024_07_15: 0.113, holds_4_4: true },
+    shrink_50: { oof_logloss: 0.585, oof_auc: 0.754, oof_brier: 0.201, margin_2024_07_15: 0.114, holds_4_4: true },
+    shrink_100: { oof_logloss: 0.584, oof_auc: 0.754, oof_brier: 0.2, margin_2024_07_15: 0.115, holds_4_4: true },
+    decision: 'No shrink reaches margin 0.14; shrink 100 gains 0.001. B0 stands.',
   },
   // v7: the verdict rule is now on real per-farmer dollars (net/hour at the standard stake,
   // 0.02% of TVL, and the odds floor), so the sweep is on those two knobs. The literal
